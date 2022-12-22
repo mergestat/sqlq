@@ -27,8 +27,10 @@ func TestEnqueue(t *testing.T) {
 
 		t.Run(fmt.Sprintf("enqueue-%d", i), func(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
-			if _, err := Enqueue(upstream, queue, NewAdditionJob(rand.Int(), rand.Int())); err != nil {
+			if job, err := Enqueue(upstream, queue, NewAdditionJob(rand.Int(), rand.Int())); err != nil {
 				t.Fatal(err)
+			} else {
+				t.Logf("enqueued: %#v", job)
 			}
 		})
 	}

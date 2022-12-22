@@ -2,11 +2,16 @@ package sqlq
 
 import (
 	"database/sql"
+	"database/sql/driver"
+	"github.com/pkg/errors"
 	"time"
 )
 
 // Queue represents a named group / queue where jobs can be pushed / enqueued.
 type Queue string
+
+// ensure
+//go:generate stringer -type=JobState -linecomment -trimprefix Job -output job_state.go
 
 // JobState represents the status a job is in and serves as the basis of a job's state machine.
 //
@@ -28,13 +33,36 @@ type Queue string
 // A job starts in the PENDING state when it is Enqueue()'d. A worker would than pick it up and transition it to RUNNING.
 // If the job finishes without any error, it is moved to SUCCESS. If an error occurs and runtime determines that the
 // job can be retried, it will move it back to the PENDING state, else it will move it to the ERRORED state.
-type JobState string
+type JobState uint
+
+func (i JobState) Value() (driver.Value, error) { return i.String(), nil }
+
+func (i *JobState) Scan(src interface{}) error {
+	if val, ok := src.(string); !ok {
+		return errors.New("jobs state must be a string")
+	} else {
+		switch val {
+		case "pending":
+			*i = StatePending
+		case "running":
+			*i = StateRunning
+		case "success":
+			*i = StateSuccess
+		case "errored":
+			*i = StateErrored
+		default:
+			*i = StateInvalid
+		}
+	}
+	return nil
+}
 
 const (
-	StatePending = JobState("pending")
-	StateRunning = JobState("running")
-	StateSuccess = JobState("success")
-	StateErrored = JobState("errored")
+	StateInvalid JobState = iota // invalid
+	StatePending                 // pending
+	StateRunning                 // running
+	StateSuccess                 // success
+	StateErrored                 // errored
 )
 
 // JobDescription describes a job to be enqueued. Note that it is just a set of options (that closely resembles) for a job,
