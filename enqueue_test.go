@@ -13,7 +13,7 @@ func NewAdditionJob(a, b int) *JobDescription {
 	var input = struct{ A, B int }{A: a, B: b}
 	var params, _ = json.Marshal(&input)
 
-	return NewJobDesc("addition", WithParameters(params))
+	return NewJobDesc("addition", WithParameters(params), WithRetention(24*time.Hour))
 }
 
 func TestEnqueue(t *testing.T) {

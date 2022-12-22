@@ -3,6 +3,7 @@ package sqlq
 import (
 	"context"
 	"database/sql"
+	"github.com/blockloop/scan"
 	"github.com/jackc/pgconn"
 	"github.com/pkg/errors"
 )
@@ -26,19 +27,17 @@ func Enqueue(db *sql.DB, queue Queue, desc *JobDescription) (_ *Job, err error) 
 	}
 
 	var rows *sql.Rows
-	const createJob = `INSERT INTO sqlq.jobs (queue, typename, parameters, run_after, retention_ttl) VALUES ($1, $2, $3, $4, $5) RETURNING (id)`
+	const createJob = `INSERT INTO sqlq.jobs (queue, typename, parameters, run_after, retention_ttl) VALUES ($1, $2, $3, $4, $5) RETURNING *`
 	if rows, err = tx.QueryContext(ctx, createJob, queue, desc.typeName, desc.parameters, desc.runAfter, desc.retentionTTL); err != nil {
 		return nil, errors.Wrap(err, "failed to enqueue job")
 	}
-	defer rows.Close()
 
-	if !rows.Next() { // there must be exactly one row of output!
-		return nil, errors.Errorf("failed to enqueue job")
-	}
+	var job Job
+	if err = scan.RowStrict(&job, rows); err != nil {
+		if err == sql.ErrNoRows { // there must be exactly one row of output!
+			return nil, errors.Errorf("failed to enqueue job")
+		}
 
-	// TODO(@riyaz): scan all the job fields
-	var job = &Job{}
-	if err = rows.Scan(&job.ID); err != nil {
 		return nil, errors.Wrap(err, "failed to scan enqueued job")
 	}
 
@@ -46,7 +45,7 @@ func Enqueue(db *sql.DB, queue Queue, desc *JobDescription) (_ *Job, err error) 
 		return nil, errors.Wrap(err, "failed to enqueue job")
 	}
 
-	return job, nil
+	return &job, nil
 }
 
 // Dequeue dequeues a single job from one of the provided queues.
@@ -85,7 +84,7 @@ UPDATE sqlq.jobs
 	SET status = 'running'
 FROM dequeued dq
 	WHERE jobs.id = dq.id
-RETURNING jobs.id, jobs.queue, jobs.typename
+RETURNING jobs.*
 `
 	var rows *sql.Rows
 	if rows, err = tx.QueryContext(ctx, dequeue, queues); err != nil {
@@ -100,25 +99,23 @@ RETURNING jobs.id, jobs.queue, jobs.typename
 		return nil, errors.Wrap(err, "failed to dequeue task")
 	}
 
-	var job *Job = nil
-	if has := rows.Next(); has {
-		job = new(Job)
-
-		// TODO(@riyaz): scan all the job fields
-		if err = rows.Scan(&job.ID, &job.Queue, &job.TypeName); err != nil {
-			_, _ = rows.Close(), tx.Rollback()
-
-			// if it's a serialization error than retry the dequeue operation
-			var postgresError *pgconn.PgError
-			if errors.As(err, &postgresError) && postgresError.Code == "40001" {
-				goto retry
-			}
-
-			return nil, errors.Wrap(err, "failed to scan dequeued job")
+	var job Job
+	if err = scan.Row(&job, rows); err != nil {
+		if err == sql.ErrNoRows { // no jobs in the queues
+			_ = tx.Commit() // close the transaction
+			return nil, nil
 		}
-	}
 
-	_ = rows.Close() // we are done with the cursor
+		_ = tx.Rollback() // in any other case we roll back the transaction
+
+		// if it's a serialization error than retry the dequeue operation
+		var postgresError *pgconn.PgError
+		if errors.As(err, &postgresError) && postgresError.Code == "40001" {
+			goto retry
+		}
+
+		return nil, errors.Wrap(err, "failed to scan dequeued job")
+	}
 
 	if err = tx.Commit(); err != nil {
 		// we might have dequeued a task, but we can still fail to commit
@@ -133,5 +130,5 @@ RETURNING jobs.id, jobs.queue, jobs.typename
 		return nil, errors.Wrap(err, "failed to dequeue job")
 	}
 
-	return job, nil
+	return &job, nil
 }

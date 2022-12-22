@@ -36,23 +36,23 @@ CREATE TABLE sqlq.job_states
 -- TODO(@riyaz): implement support for job timeout
 CREATE TABLE sqlq.jobs
 (
-    id            BIGSERIAL PRIMARY KEY,                        -- unique identifier for the job in the system
-    queue         TEXT            NOT NULL,                     -- the queue this job belongs to
-    typename      TEXT            NOT NULL,                     -- typename of the job registered with the runtime
-    status        TEXT            NOT NULL DEFAULT ('pending'), -- state of a job in its state machine
-    priority      INT             NOT NULL DEFAULT (1),         -- the job's priority within the queue
+    id            BIGSERIAL PRIMARY KEY,                    -- unique identifier for the job in the system
+    queue         TEXT        NOT NULL,                     -- the queue this job belongs to
+    typename      TEXT        NOT NULL,                     -- typename of the job registered with the runtime
+    status        TEXT        NOT NULL DEFAULT ('pending'), -- state of a job in its state machine
+    priority      INT         NOT NULL DEFAULT (1),         -- the job's priority within the queue
 
     -- job's input and output
-    parameters    JSON            NULL,
-    result        JSON            NULL,
+    parameters    JSON        NULL,
+    result        JSON        NULL,
 
-    created_at    TIMESTAMPTZ     NOT NULL DEFAULT (now()),     -- when the job was first enqueued (not including retries)
-    started_at    TIMESTAMPTZ,                                  -- when the job last transitioned from PENDING -> RUNNING
-    completed_at  TIMESTAMPTZ,                                  -- when the job transitioned into a completion state (SUCCESS / ERROR)
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT (now()),     -- when the job was first enqueued (not including retries)
+    started_at    TIMESTAMPTZ,                              -- when the job last transitioned from PENDING -> RUNNING
+    completed_at  TIMESTAMPTZ,                              -- when the job transitioned into a completion state (SUCCESS / ERROR)
 
     -- Seconds after which the task must be executed (regardless of available capacity)
     -- This is used to implement "future execution" of task and exponential back-off retry policies.
-    run_after     INTERVAL SECOND          DEFAULT ('0'::interval),
+    run_after     BIGINT               DEFAULT (0),
 
     -- TODO(@riyaz): add support for retries
     --
@@ -61,7 +61,7 @@ CREATE TABLE sqlq.jobs
 
     -- Seconds to retain the output of the job after it has completed before its cleared.
     -- A jobs is cleared by the runtime as soon as NOW() > (completed_at + retention_ttl) WHERE completed_at IS NOT NULL
-    retention_ttl INTERVAL SECOND NOT NULL DEFAULT ('0'::interval),
+    retention_ttl BIGINT      NOT NULL DEFAULT (0),
 
     -- Queue references sqlq.queue entry.
     -- We have an ON DELETE CASCADE to remove a job when the queue is deleted.

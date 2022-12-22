@@ -40,6 +40,7 @@ func TestDequeue(t *testing.T) {
 		if err != nil || job == nil {
 			t.Fatalf("failed to dequeue") // shouldn't error out and must return a job
 		}
+		t.Logf("dequeued: %#v", job)
 
 		if i == 1 {
 			// for the first run, it MUST pull from the critical queue

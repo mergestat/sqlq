@@ -1,6 +1,9 @@
 package sqlq
 
-import "time"
+import (
+	"database/sql"
+	"time"
+)
 
 type Queue string
 
@@ -39,19 +42,19 @@ func WithRetention(dur time.Duration) func(*JobDescription) {
 }
 
 type Job struct {
-	ID       int
-	Queue    Queue
-	TypeName string
-	Priority int
-	Status   JobState
+	ID       int      `db:"id"`
+	Queue    Queue    `db:"queue"`
+	TypeName string   `db:"typename"`
+	Priority int      `db:"priority"`
+	Status   JobState `db:"status"`
 
-	Parameters []byte
-	Result     []byte
+	Parameters []byte `db:"parameters"`
+	Result     []byte `db:"result"`
 
-	CreatedAt   time.Time
-	StartedAt   time.Time
-	CompletedAt time.Time
+	CreatedAt   time.Time    `db:"created_at"`
+	StartedAt   sql.NullTime `db:"started_at"`
+	CompletedAt sql.NullTime `db:"completed_at"`
 
-	RunAfter     time.Duration
-	RetentionTTL time.Duration
+	RunAfter     time.Duration `db:"run_after"`
+	RetentionTTL time.Duration `db:"retention_ttl"`
 }
