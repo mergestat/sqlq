@@ -132,3 +132,58 @@ RETURNING jobs.*
 
 	return &job, nil
 }
+
+// Success transitions the job to SUCCESS state and mark it as completed.
+func Success(db *sql.DB, job *Job) (err error) {
+	var ctx = context.Background()
+
+	var tx *sql.Tx
+	if tx, err = db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault}); err != nil {
+		return errors.Wrap(err, "failed to start transaction")
+	}
+	defer tx.Rollback()
+
+	var rows *sql.Rows
+	const markCompleted = `UPDATE sqlq.jobs SET status = $3, completed_at = NOW() WHERE id = $1 AND status = $2 RETURNING *`
+	if rows, err = tx.QueryContext(ctx, markCompleted, job.ID, job.Status, StateSuccess); err != nil {
+		return errors.Wrap(err, "failed to mark job as completed")
+	}
+
+	if err = scan.Row(job, rows); err != nil {
+		if err == sql.ErrNoRows { // job wasn't in the given state?
+			return errors.Wrapf(ErrJobStateMismatch, "expected job to be in %s", job.Status)
+		}
+		return errors.Wrap(err, "failed to read back values")
+	}
+
+	return errors.Wrap(tx.Commit(), "failed to commit transaction")
+}
+
+// Error transitions the job to ERROR state and mark it as completed. If the error is retryable (and there are still attempts left),
+// we bump the attempt count and transition it to PENDING to be picked up again by a worker.
+func Error(db *sql.DB, job *Job, _ error) (err error) {
+	var ctx = context.Background()
+
+	var tx *sql.Tx
+	if tx, err = db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault}); err != nil {
+		return errors.Wrap(err, "failed to start transaction")
+	}
+	defer tx.Rollback()
+
+	// TODO(@riyaz): implement support for retries
+
+	var rows *sql.Rows
+	const markCompleted = `UPDATE sqlq.jobs SET status = $3, completed_at = NOW() WHERE id = $1 AND status = $2 RETURNING *`
+	if rows, err = tx.QueryContext(ctx, markCompleted, job.ID, job.Status, StateErrored); err != nil {
+		return errors.Wrap(err, "failed to mark job as completed")
+	}
+
+	if err = scan.Row(job, rows); err != nil {
+		if err == sql.ErrNoRows { // job wasn't in the given state?
+			return errors.Wrapf(ErrJobStateMismatch, "expected job to be in %s", job.Status)
+		}
+		return errors.Wrap(err, "failed to read back values")
+	}
+
+	return errors.Wrap(tx.Commit(), "failed to commit transaction")
+}

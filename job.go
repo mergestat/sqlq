@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+var (
+	// ErrJobStateMismatch is returned if an optimistic locking failure occurs when transitioning
+	// a job between states. It usually indicates that some other has updated the state of the job
+	// after we have read it from the store.
+	ErrJobStateMismatch = errors.New("job state mismatch")
+)
+
 // Queue represents a named group / queue where jobs can be pushed / enqueued.
 type Queue string
 
