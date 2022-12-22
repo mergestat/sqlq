@@ -5,8 +5,29 @@ import (
 	"time"
 )
 
+// Queue represents a named group / queue where jobs can be pushed / enqueued.
 type Queue string
 
+// JobState represents the status a job is in and serves as the basis of a job's state machine.
+//
+//	                    +-----------+
+//	Enqueue()----------|  PENDING  |----------------+
+//	                   +-----------+                |
+//	                         |                      |
+//	                         |                      |
+//	                   +-----|-----+            +---|----+
+//	                   |  RUNNING  |------------| Retry? |
+//	                   +-----------+            +--------+
+//	                         |                      |
+//	                         |                      |
+//	                         |                      |
+//	                   +-----|-----+            +---|-----+
+//	                   |  SUCCESS  |            | ERRORED |
+//	                   +-----------+            +---------+
+//
+// A job starts in the PENDING state when it is Enqueue()'d. A worker would than pick it up and transition it to RUNNING.
+// If the job finishes without any error, it is moved to SUCCESS. If an error occurs and runtime determines that the
+// job can be retried, it will move it back to the PENDING state, else it will move it to the ERRORED state.
 type JobState string
 
 const (
@@ -25,6 +46,7 @@ type JobDescription struct {
 	retentionTTL time.Duration
 }
 
+// NewJobDesc creates a new JobDescription for a job with given typename and with the provided opts.
 func NewJobDesc(typeName string, opts ...func(*JobDescription)) *JobDescription {
 	var jd = &JobDescription{typeName: typeName}
 	for _, fn := range opts {
@@ -33,14 +55,17 @@ func NewJobDesc(typeName string, opts ...func(*JobDescription)) *JobDescription 
 	return jd
 }
 
+// WithParameters is used to pass additional parameters / arguments to the job. Note that params must be a JSON-encoded value.
 func WithParameters(params []byte) func(*JobDescription) {
 	return func(desc *JobDescription) { desc.parameters = params }
 }
 
+// WithRetention sets the retention policy for a job. A completed job will be cleaned up after its retention policy expires.
 func WithRetention(dur time.Duration) func(*JobDescription) {
 	return func(desc *JobDescription) { desc.retentionTTL = dur }
 }
 
+// Job represents an instance of a task / job in a queue.
 type Job struct {
 	ID       int      `db:"id"`
 	Queue    Queue    `db:"queue"`
