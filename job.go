@@ -3,8 +3,9 @@ package sqlq
 import (
 	"database/sql"
 	"database/sql/driver"
-	"github.com/pkg/errors"
 	"time"
+
+	"github.com/pkg/errors"
 )
 
 var (
@@ -22,7 +23,7 @@ type Queue string
 
 // JobState represents the status a job is in and serves as the basis of a job's state machine.
 //
-//	                    +-----------+
+//	                   +-----------+
 //	Enqueue()----------|  PENDING  |----------------+
 //	                   +-----------+                |
 //	                         |                      |
