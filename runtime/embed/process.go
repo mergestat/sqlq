@@ -4,10 +4,14 @@ import (
 	"context"
 	"github.com/mergestat/sqlq"
 	"github.com/pkg/errors"
+	logger "log"
+	"os"
 	"time"
 )
 
 func process(worker *Worker) (shutdown func(timeout time.Duration)) {
+	// TODO(@riyaz): replace with user-supplied logger
+	var log = logger.New(os.Stderr, "sqlq: ", logger.LstdFlags)
 	var err error
 
 	// Channels used to communicate with the processor goroutines below
@@ -21,6 +25,7 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 		for {
 			select {
 			case <-quit:
+				log.Printf("received signal to terminate")
 				return
 
 			// acquire a token to process a job
@@ -29,7 +34,7 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 
 				// TODO(@riyaz): filter jobs by limiting to types implemented by the worker
 				if dequeued, err = sqlq.Dequeue(worker.db, worker.queues); err != nil {
-					// TODO(@riyaz): should we fail? or log & continue?
+					log.Printf("failed to dequeue job: %#v", err)
 					<-sema // release semaphore token
 					continue
 				}
@@ -44,7 +49,6 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 
 				// launch another goroutine to supervise the task in background
 				// we launch one more goroutine within this where the actual handler is invoked
-				// TODO(@riyaz): handle all suppressed error here
 				go func(job *sqlq.Job) {
 					defer func() { <-sema }() // release semaphore token
 
@@ -55,7 +59,9 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 					// check context before starting routine
 					select {
 					case <-jobContext.Done():
-						_ = sqlq.Error(worker.db, job, jobContext.Err())
+						if err = sqlq.Error(worker.db, job, jobContext.Err()); err != nil {
+							log.Printf("failed to mark job as errored: %#v", err)
+						}
 						return
 					default:
 					}
@@ -63,7 +69,9 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 					fn, ok := worker.handlers[job.TypeName]
 					if !ok {
 						// type not supported. this should be removed once we support filtering by type in sqlq.Dequeue()
-						_ = sqlq.Error(worker.db, job, errors.Errorf("type(%s) not implemented by the worker", job.TypeName))
+						if err = sqlq.Error(worker.db, job, errors.Errorf("type(%s) not implemented by the worker", job.TypeName)); err != nil {
+							log.Printf("failed to mark job as errored: %#v", err)
+						}
 						return
 					}
 
@@ -75,14 +83,22 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 					// TODO(@riyaz): to implement job timeouts, add a case here that calls cancel()
 					case <-abort:
 						// TODO(@riyaz): should this be re-queued? explicitly? or let reaper find it and clean it up?
-						_ = sqlq.Error(worker.db, job, errors.New("job aborted"))
+						if err = sqlq.Error(worker.db, job, errors.New("job aborted")); err != nil {
+							log.Printf("failed to mark job as errored: %#v", err)
+						}
 					case <-jobContext.Done():
-						_ = sqlq.Error(worker.db, job, jobContext.Err())
+						if err = sqlq.Error(worker.db, job, jobContext.Err()); err != nil {
+							log.Printf("failed to mark job as errored: %#v", err)
+						}
 					case resultError := <-result:
 						if resultError != nil {
-							_ = sqlq.Error(worker.db, job, resultError)
+							if err = sqlq.Error(worker.db, job, resultError); err != nil {
+								log.Printf("failed to mark job as errored: %#v", err)
+							}
 						} else {
-							_ = sqlq.Success(worker.db, job)
+							if err = sqlq.Success(worker.db, job); err != nil {
+								log.Printf("failed to mark job as success: %#v", err)
+							}
 						}
 					}
 				}(dequeued)

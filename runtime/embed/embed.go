@@ -142,6 +142,7 @@ func (worker *Worker) Shutdown(timeout time.Duration) error {
 	return nil
 }
 
+// Register registers the given function as the handler for given job type.
 func (worker *Worker) Register(typeName string, handler Handler) {
 	worker.handlers[typeName] = handler
 }
