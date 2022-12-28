@@ -56,6 +56,17 @@ func Enqueue(db *sql.DB, queue Queue, desc *JobDescription) (_ *Job, err error) 
 	return &job, nil
 }
 
+// DequeueFilters are a set of optional filters that can be used with Dequeue()
+type DequeueFilters struct {
+	typeName []string
+}
+
+func WithTypeName(names []string) func(*DequeueFilters) {
+	return func(filters *DequeueFilters) {
+		filters.typeName = append(filters.typeName, names...)
+	}
+}
+
 // Dequeue dequeues a single job from one of the provided queues.
 //
 // It takes into account several factors such as a queue's concurrency
@@ -63,9 +74,14 @@ func Enqueue(db *sql.DB, queue Queue, desc *JobDescription) (_ *Job, err error) 
 // executing this job, the queue's concurrency setting would not be violated.
 //
 // TODO(@riyaz): support filtering by job types as well
-func Dequeue(db *sql.DB, queues []Queue) (_ *Job, err error) {
+func Dequeue(db *sql.DB, queues []Queue, filterFuncs ...func(*DequeueFilters)) (_ *Job, err error) {
 	var ctx = context.Background()
 	var tx *sql.Tx
+
+	var filters = &DequeueFilters{}
+	for _, fn := range filterFuncs {
+		fn(filters)
+	}
 
 retry:
 	if tx, err = db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable}); err != nil {
@@ -84,7 +100,9 @@ WITH queues AS (
         WHERE (concurrency IS NULL OR (concurrency - COALESCE(running.count, 0) > 0))
 ), dequeued(id) AS (
     SELECT job.id FROM sqlq.jobs job, queue_with_capacity q
-        WHERE job.status = 'pending' AND job.queue = q.name
+        WHERE job.status = 'pending' 
+          AND job.queue = q.name 
+          AND (ARRAY_LENGTH($2::text[], 1) IS NULL OR job.typename = ANY($2))
     ORDER BY q.priority DESC, job.priority DESC, job.created_at
     LIMIT 1
 )
@@ -95,7 +113,7 @@ FROM dequeued dq
 RETURNING jobs.*
 `
 	var rows *sql.Rows
-	if rows, err = tx.QueryContext(ctx, dequeue, queues); err != nil {
+	if rows, err = tx.QueryContext(ctx, dequeue, queues, filters.typeName); err != nil {
 		_ = tx.Rollback()
 
 		// if it's a serialization error than retry the dequeue operation

@@ -21,6 +21,12 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 	var quit, abort = make(chan struct{}), make(chan struct{})
 	var sema = make(chan struct{}, worker.concurrency) // use a semaphore to limit worker concurrency
 
+	// prepare list of supported job types
+	var supportedTypes = make([]string, 0, len(worker.handlers))
+	for name := range worker.handlers {
+		supportedTypes = append(supportedTypes, name)
+	}
+
 	go func() {
 		for {
 			select {
@@ -33,7 +39,7 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 				var dequeued *sqlq.Job
 
 				// TODO(@riyaz): filter jobs by limiting to types implemented by the worker
-				if dequeued, err = sqlq.Dequeue(worker.db, worker.queues); err != nil {
+				if dequeued, err = sqlq.Dequeue(worker.db, worker.queues, sqlq.WithTypeName(supportedTypes)); err != nil {
 					log.Printf("failed to dequeue job: %#v", err)
 					<-sema // release semaphore token
 					continue
@@ -68,11 +74,9 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 
 					fn, ok := worker.handlers[job.TypeName]
 					if !ok {
-						// type not supported. this should be removed once we support filtering by type in sqlq.Dequeue()
-						if err = sqlq.Error(worker.db, job, errors.Errorf("type(%s) not implemented by the worker", job.TypeName)); err != nil {
-							log.Printf("failed to mark job as errored: %#v", err)
-						}
-						return
+						// THIS SHOULD NOT HAPPEN UNDER ANY CIRCUMSTANCE.
+						// Best way deemed to handle this is to crash fast and loud.
+						panic(errors.Errorf("sqlq: type (%q) not supported but got picked", job.TypeName))
 					}
 
 					// run user defined handler inside a wrapper to catch any panics which might cause the worker to crash
@@ -121,7 +125,7 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 
 func panicWrap(fn func() error) (err error) {
 	defer func() {
-		if recoverError := recover(); err == nil {
+		if recoverError := recover(); recoverError != nil && err == nil {
 			err = errors.Errorf("sqlq: recovered from panic: %v", recoverError)
 		}
 	}()

@@ -52,9 +52,6 @@ const (
 	// workerStateActive indicates the server is up and active
 	workerStateActive
 
-	// workerStateStopped indicates the is up but no longer processing new tasks.
-	workerStateStopped
-
 	// workerStateClosed indicates the server has been shutdown.
 	workerStateClosed
 )
@@ -111,8 +108,6 @@ func (worker *Worker) Start() error {
 		switch worker.state.value {
 		case workerStateActive:
 			return errors.Errorf("sqlq: worker is already running")
-		case workerStateStopped:
-			return errors.Errorf("sqlq: worker is stopped and waiting for shutdown")
 		case workerStateClosed:
 			return ErrWorkerClosed
 		}
@@ -143,6 +138,17 @@ func (worker *Worker) Shutdown(timeout time.Duration) error {
 }
 
 // Register registers the given function as the handler for given job type.
-func (worker *Worker) Register(typeName string, handler Handler) {
+func (worker *Worker) Register(typeName string, handler Handler) error {
+	worker.state.mu.Lock()
+	defer worker.state.mu.Unlock()
+
+	if worker.state.value != workerStateNew {
+		if worker.state.value == workerStateClosed {
+			return ErrWorkerClosed
+		}
+		return errors.Errorf("cannot register new job type; worker is already running.")
+	}
+
 	worker.handlers[typeName] = handler
+	return nil
 }

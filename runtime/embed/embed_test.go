@@ -35,7 +35,7 @@ func TestEmbedBasic(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(10)
 
-	worker.Register("notify", WaitGroupNotifier(&wg))
+	_ = worker.Register("notify", WaitGroupNotifier(&wg))
 
 	if err := worker.Start(); err != nil {
 		t.Fatalf("failed to start worker: %v", err)
