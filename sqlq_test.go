@@ -32,9 +32,9 @@ func TestMain(m *testing.M) {
 	var code = m.Run()
 
 	// teardown the sql migrations
-	if err := schema.Teardown(upstream); err != nil {
-		log.Fatalf("failed to teardown schema migration: %v", err)
-	}
+	// if err := schema.Teardown(upstream); err != nil {
+	//	 log.Fatalf("failed to teardown schema migration: %v", err)
+	// }
 
 	os.Exit(code)
 }
