@@ -20,14 +20,7 @@ func Enqueue(db *sql.DB, queue Queue, desc *JobDescription) (_ *Job, err error) 
 	if tx, err = db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault}); err != nil {
 		return nil, errors.Wrap(err, "failed to start transaction")
 	}
-	defer func() {
-		if rbErr := tx.Rollback(); rbErr != nil {
-			// TODO(@riyaz): validate that this is how we want to handle this
-			if !errors.Is(rbErr, sql.ErrTxDone) {
-				err = errors.Wrap(rbErr, "failed to rollback transaction")
-			}
-		}
-	}()
+	defer rollback(tx, &err)
 
 	const upsertQueue = `INSERT INTO sqlq.queues (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`
 	if _, err = tx.ExecContext(ctx, upsertQueue, queue); err != nil {
@@ -167,14 +160,7 @@ func Success(db *sql.DB, job *Job) (err error) {
 	if tx, err = db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault}); err != nil {
 		return errors.Wrap(err, "failed to start transaction")
 	}
-	defer func() {
-		if rbErr := tx.Rollback(); err != nil {
-			// TODO(@riyaz): validate that this is how we want to handle this
-			if !errors.Is(rbErr, sql.ErrTxDone) {
-				err = errors.Wrap(rbErr, "failed to rollback transaction")
-			}
-		}
-	}()
+	defer rollback(tx, &err)
 
 	var rows *sql.Rows
 	const markCompleted = `UPDATE sqlq.jobs SET status = $3, completed_at = NOW() WHERE id = $1 AND status = $2 RETURNING *`
@@ -201,14 +187,7 @@ func Error(db *sql.DB, job *Job, _ error) (err error) {
 	if tx, err = db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault}); err != nil {
 		return errors.Wrap(err, "failed to start transaction")
 	}
-	defer func() {
-		if rbErr := tx.Rollback(); err != nil {
-			// TODO(@riyaz): validate that this is how we want to handle this
-			if !errors.Is(rbErr, sql.ErrTxDone) {
-				err = errors.Wrap(rbErr, "failed to rollback transaction")
-			}
-		}
-	}()
+	defer rollback(tx, &err)
 
 	// TODO(@riyaz): implement support for retries
 
@@ -226,4 +205,12 @@ func Error(db *sql.DB, job *Job, _ error) (err error) {
 	}
 
 	return errors.Wrap(tx.Commit(), "failed to commit transaction")
+}
+
+// rollback is a utility method to be used in defer context to safely roll back a transaction,
+// and correctly capture any error (other than sql.ErrTxDone) it might throw.
+func rollback(tx *sql.Tx, err *error) {
+	if rErr := tx.Rollback(); *err == nil && (rErr != nil && rErr != sql.ErrTxDone) {
+		*err = errors.Wrap(rErr, "failed to rollback transaction")
+	}
 }
