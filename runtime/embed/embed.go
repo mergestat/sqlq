@@ -59,6 +59,9 @@ const (
 // ErrWorkerClosed indicates that the worker has already been closed
 var ErrWorkerClosed = errors.New("sqlq: worker closed")
 
+// ErrWorkerRunning indicated that the worker has already started running, and no further changes can be made
+var ErrWorkerRunning = errors.New("sqlq: worker running")
+
 // Worker is the main service where you'd register handlers for different job types,
 // and it'd (at configured time intervals) pull jobs from the queue to execute.
 //
@@ -107,7 +110,7 @@ func (worker *Worker) Start() error {
 
 		switch worker.state.value {
 		case workerStateActive:
-			return errors.Errorf("sqlq: worker is already running")
+			return ErrWorkerRunning
 		case workerStateClosed:
 			return ErrWorkerClosed
 		}
@@ -146,7 +149,7 @@ func (worker *Worker) Register(typeName string, handler Handler) error {
 		if worker.state.value == workerStateClosed {
 			return ErrWorkerClosed
 		}
-		return errors.Errorf("cannot register new job type; worker is already running.")
+		return errors.Wrap(ErrWorkerRunning, "cannot register new job type")
 	}
 
 	worker.handlers[typeName] = handler
