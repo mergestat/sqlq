@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-func WaitGroupNotifier(wg *sync.WaitGroup) embed.HandlerFunc {
+func WaitGroupNotifier(wg *sync.WaitGroup) sqlq.HandlerFunc {
 	return func(_ context.Context, _ *sqlq.Job) error { wg.Done(); return nil }
 }
 
@@ -20,7 +20,7 @@ func NewNotifyTask() *sqlq.JobDescription {
 	return sqlq.NewJobDesc("notify")
 }
 
-func ArgumentTest(expected int) embed.HandlerFunc {
+func ArgumentTest(expected int) sqlq.HandlerFunc {
 	return func(_ context.Context, job *sqlq.Job) error {
 		var received int
 		if err := json.Unmarshal(job.Parameters, &received); err != nil {

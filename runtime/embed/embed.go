@@ -5,7 +5,6 @@
 package embed
 
 import (
-	"context"
 	"database/sql"
 	"github.com/mergestat/sqlq"
 	"github.com/pkg/errors"
@@ -13,21 +12,6 @@ import (
 	"sync"
 	"time"
 )
-
-// Handler is the user-provided implementation of the job's business logic.
-type Handler interface {
-
-	// Process implements the job's logic to process the given job.
-	//
-	// It should return nil if the processing of the job is successful.
-	//
-	// If Process() returns an error or panics, the job is marked as failed.
-	Process(ctx context.Context, job *sqlq.Job) error
-}
-
-type HandlerFunc func(ctx context.Context, job *sqlq.Job) error
-
-func (fn HandlerFunc) Process(ctx context.Context, job *sqlq.Job) error { return fn(ctx, job) }
 
 type WorkerConfig struct {
 	// Maximum number of concurrent processing of tasks this worker should handle.
@@ -68,10 +52,10 @@ var ErrWorkerRunning = errors.New("sqlq: worker running")
 // A worker also owns and manages lifecycle of other critical services, like, reaper and janitor.
 // It provides an execution environment for a job, and manages critical things such as log shipping, keep-alive etc.
 type Worker struct {
-	db          *sql.DB            // connection to the underlying database
-	handlers    map[string]Handler // collection of all registered handlers
-	queues      []sqlq.Queue       // List of queues to pull jobs from
-	concurrency int                // configured worker concurrency
+	db          *sql.DB                 // connection to the underlying database
+	handlers    map[string]sqlq.Handler // collection of all registered handlers
+	queues      []sqlq.Queue            // List of queues to pull jobs from
+	concurrency int                     // configured worker concurrency
 
 	// TODO(@riyaz): find a better pattern to implement service shutdown
 	stopProcessor func(time.Duration)
@@ -85,7 +69,7 @@ type Worker struct {
 
 // NewWorker creates a new instance of worker, configures it using the provided options and return it.
 func NewWorker(db *sql.DB, config WorkerConfig) (*Worker, error) {
-	var worker = &Worker{db: db, handlers: make(map[string]Handler)}
+	var worker = &Worker{db: db, handlers: make(map[string]sqlq.Handler)}
 
 	if len(config.Queues) == 0 {
 		return nil, errors.New("provide list of queues to watch")
@@ -141,7 +125,7 @@ func (worker *Worker) Shutdown(timeout time.Duration) error {
 }
 
 // Register registers the given function as the handler for given job type.
-func (worker *Worker) Register(typeName string, handler Handler) error {
+func (worker *Worker) Register(typeName string, handler sqlq.Handler) error {
 	worker.state.mu.Lock()
 	defer worker.state.mu.Unlock()
 
