@@ -38,7 +38,7 @@ func TestDequeue(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		job, err := Dequeue(upstream, queues)
 		if err != nil || job == nil {
-			t.Fatalf("failed to dequeue") // shouldn't error out and must return a job
+			t.Fatalf("failed to dequeue: %#v", err) // shouldn't error out and must return a job
 		}
 		t.Logf("dequeued: %#v", job)
 

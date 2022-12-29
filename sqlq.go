@@ -9,27 +9,36 @@ import (
 	"github.com/pkg/errors"
 )
 
+// Connection is a utility abstraction over sql connection / pool / transaction objects.
+// This is so that the semantics of the operation (should we roll back on error?) are
+// defined by the caller of the routine and not decided by the routine itself.
+//
+// This allows user to run Enqueue() (and other) operations in, say, a common transaction,
+// with the rest of the business logic. It ensures that the job is only queued if the business
+// logic finishes successfully and commits, else the Enqueue() is also rolled back.
+type Connection interface {
+	// QueryContext executes a query that returns rows.
+	QueryContext(ctx context.Context, query string, args ...interface{}) (*sql.Rows, error)
+
+	// ExecContext executes a query that doesn't return rows.
+	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
+}
+
 // Enqueue enqueues a new job in the given queue based on provided description.
 //
 // The queue is created if it doesn't already exist. By default, a job is created in 'pending' state.
 // It returns the newly created job instance.
-func Enqueue(db *sql.DB, queue Queue, desc *JobDescription) (_ *Job, err error) {
+func Enqueue(cx Connection, queue Queue, desc *JobDescription) (_ *Job, err error) {
 	var ctx = context.Background()
 
-	var tx *sql.Tx
-	if tx, err = db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault}); err != nil {
-		return nil, errors.Wrap(err, "failed to start transaction")
-	}
-	defer rollback(tx, &err)
-
 	const upsertQueue = `INSERT INTO sqlq.queues (name) VALUES ($1) ON CONFLICT (name) DO NOTHING`
-	if _, err = tx.ExecContext(ctx, upsertQueue, queue); err != nil {
+	if _, err = cx.ExecContext(ctx, upsertQueue, queue); err != nil {
 		return nil, errors.Wrap(err, "failed to create queue")
 	}
 
 	var rows *sql.Rows
 	const createJob = `INSERT INTO sqlq.jobs (queue, typename, parameters, run_after, retention_ttl) VALUES ($1, $2, $3, $4, $5) RETURNING *`
-	if rows, err = tx.QueryContext(ctx, createJob, queue, desc.typeName, desc.parameters, desc.runAfter, desc.retentionTTL); err != nil {
+	if rows, err = cx.QueryContext(ctx, createJob, queue, desc.typeName, desc.parameters, desc.runAfter, desc.retentionTTL); err != nil {
 		return nil, errors.Wrap(err, "failed to enqueue job")
 	}
 
@@ -40,10 +49,6 @@ func Enqueue(db *sql.DB, queue Queue, desc *JobDescription) (_ *Job, err error) 
 		}
 
 		return nil, errors.Wrap(err, "failed to scan enqueued job")
-	}
-
-	if err = tx.Commit(); err != nil {
-		return nil, errors.Wrap(err, "failed to enqueue job")
 	}
 
 	return &job, nil
@@ -65,8 +70,6 @@ func WithTypeName(names []string) func(*DequeueFilters) {
 // It takes into account several factors such as a queue's concurrency
 // and priority settings as well a job's priority. It ensures that by
 // executing this job, the queue's concurrency setting would not be violated.
-//
-// TODO(@riyaz): support filtering by job types as well
 func Dequeue(db *sql.DB, queues []Queue, filterFuncs ...func(*DequeueFilters)) (_ *Job, err error) {
 	var ctx = context.Background()
 	var tx *sql.Tx
@@ -153,18 +156,12 @@ RETURNING jobs.*
 }
 
 // Success transitions the job to SUCCESS state and mark it as completed.
-func Success(db *sql.DB, job *Job) (err error) {
+func Success(cx Connection, job *Job) (err error) {
 	var ctx = context.Background()
-
-	var tx *sql.Tx
-	if tx, err = db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault}); err != nil {
-		return errors.Wrap(err, "failed to start transaction")
-	}
-	defer rollback(tx, &err)
 
 	var rows *sql.Rows
 	const markCompleted = `UPDATE sqlq.jobs SET status = $3, completed_at = NOW() WHERE id = $1 AND status = $2 RETURNING *`
-	if rows, err = tx.QueryContext(ctx, markCompleted, job.ID, job.Status, StateSuccess); err != nil {
+	if rows, err = cx.QueryContext(ctx, markCompleted, job.ID, job.Status, StateSuccess); err != nil {
 		return errors.Wrap(err, "failed to mark job as completed")
 	}
 
@@ -175,25 +172,19 @@ func Success(db *sql.DB, job *Job) (err error) {
 		return errors.Wrap(err, "failed to read back values")
 	}
 
-	return errors.Wrap(tx.Commit(), "failed to commit transaction")
+	return nil
 }
 
 // Error transitions the job to ERROR state and mark it as completed. If the error is retryable (and there are still attempts left),
 // we bump the attempt count and transition it to PENDING to be picked up again by a worker.
-func Error(db *sql.DB, job *Job, _ error) (err error) {
+func Error(cx Connection, job *Job, _ error) (err error) {
 	var ctx = context.Background()
-
-	var tx *sql.Tx
-	if tx, err = db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelDefault}); err != nil {
-		return errors.Wrap(err, "failed to start transaction")
-	}
-	defer rollback(tx, &err)
 
 	// TODO(@riyaz): implement support for retries
 
 	var rows *sql.Rows
 	const markCompleted = `UPDATE sqlq.jobs SET status = $3, completed_at = NOW() WHERE id = $1 AND status = $2 RETURNING *`
-	if rows, err = tx.QueryContext(ctx, markCompleted, job.ID, job.Status, StateErrored); err != nil {
+	if rows, err = cx.QueryContext(ctx, markCompleted, job.ID, job.Status, StateErrored); err != nil {
 		return errors.Wrap(err, "failed to mark job as completed")
 	}
 
@@ -204,13 +195,5 @@ func Error(db *sql.DB, job *Job, _ error) (err error) {
 		return errors.Wrap(err, "failed to read back values")
 	}
 
-	return errors.Wrap(tx.Commit(), "failed to commit transaction")
-}
-
-// rollback is a utility method to be used in defer context to safely roll back a transaction,
-// and correctly capture any error (other than sql.ErrTxDone) it might throw.
-func rollback(tx *sql.Tx, err *error) {
-	if rErr := tx.Rollback(); *err == nil && (rErr != nil && rErr != sql.ErrTxDone) {
-		*err = errors.Wrap(rErr, "failed to rollback transaction")
-	}
+	return nil
 }
