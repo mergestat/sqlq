@@ -19,7 +19,7 @@ type Handler interface {
 
 	// Process implements the job's logic to process the given job.
 	//
-	// It should return nil if the processing of the job is successfully.
+	// It should return nil if the processing of the job is successful.
 	//
 	// If Process() returns an error or panics, the job is marked as failed.
 	Process(ctx context.Context, job *sqlq.Job) error
@@ -36,7 +36,7 @@ type WorkerConfig struct {
 	// to the number of CPUs usable by the current process.
 	Concurrency int
 
-	// List of queues from where the worker will the tasks.
+	// List of queues from where the worker will retrieve jobs.
 	// User must provide one or more queues to watch.
 	Queues []sqlq.Queue
 }
@@ -99,7 +99,7 @@ func NewWorker(db *sql.DB, config WorkerConfig) (*Worker, error) {
 }
 
 // Start starts background execution of worker. It schedules all background goroutines and other services to run.
-// It starts pulling job from the configured queues and start processing them.
+// It starts pulling job from the configured queues and starts processing them.
 func (worker *Worker) Start() error {
 	{ // transition into active state
 		worker.state.mu.Lock()
