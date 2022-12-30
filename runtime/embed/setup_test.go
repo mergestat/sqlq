@@ -1,4 +1,4 @@
-package sqlq_test
+package embed_test
 
 import (
 	"database/sql"

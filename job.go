@@ -1,8 +1,11 @@
 package sqlq
 
 import (
+	"bytes"
+	"context"
 	"database/sql"
 	"database/sql/driver"
+	"io"
 	"time"
 
 	"github.com/pkg/errors"
@@ -118,4 +121,51 @@ type Job struct {
 
 	RunAfter     time.Duration `db:"run_after"`
 	RetentionTTL time.Duration `db:"retention_ttl"`
+
+	// reference to runtime services; might not be available all the time
+	resultWriter *resultWriter
+}
+
+type resultWriter struct {
+	cx  Connection
+	job *Job
+
+	buf bytes.Buffer // to store intermediate writes
+}
+
+func (r *resultWriter) Write(p []byte) (n int, err error) { return r.buf.Write(p) }
+
+func (r *resultWriter) Close() error {
+	const storeResult = `UPDATE sqlq.jobs SET result = $2 WHERE id = $1 RETURNING result`
+	rows, err := r.cx.QueryContext(context.Background(), storeResult, r.job.ID, r.buf.Bytes())
+	if err != nil {
+		return errors.Wrapf(err, "failed to save job result")
+	}
+	defer func() { _ = rows.Close() }()
+
+	if rows.Next() {
+		if err = rows.Scan(&r.job.Result); err != nil {
+			return errors.Wrapf(err, "failed to save job result")
+		}
+	}
+	return nil
+}
+
+// ResultWriter returns an io.WriteCloser that can be used to save the result of a job.
+// User must close the writer to actually save the data. A result writer is only available
+// when running in the context of a runtime. Trying to call ResultWriter() in any other context
+// would cause a panic().
+func (job *Job) ResultWriter() io.WriteCloser {
+	if job.resultWriter == nil {
+		// user should not be using ResultWriter() outside a runtime context
+		panic("sqlq: result writer not set for the job")
+	}
+	return job.resultWriter
+}
+
+// AttachResultWriter attaches a result writer to the given job,
+// using the provided Connection as the backend to write to.
+func AttachResultWriter(cx Connection, job *Job) *Job {
+	job.resultWriter = &resultWriter{cx: cx, job: job}
+	return job
 }

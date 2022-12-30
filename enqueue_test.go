@@ -35,3 +35,20 @@ func TestEnqueue(t *testing.T) {
 		})
 	}
 }
+
+func TestEnqueue_NoEnqueueOnRollback(t *testing.T) {
+	var upstream = MustOpen(PostgresUrl)
+	defer upstream.Close()
+
+	var tx, _ = upstream.Begin()
+	if _, err := Enqueue(tx, "enqueue/rollback", NewAdditionJob(1, 2)); err != nil {
+		t.Fatalf("failed to enqueue job: %v", err)
+	}
+	_ = tx.Rollback()
+
+	if job, err := Dequeue(upstream, []Queue{"enqueue/rollback"}); err != nil {
+		t.Fatalf("failed to dequeue job: %v", err)
+	} else if job != nil {
+		t.Fatalf("expected job to be nil; got=%#v", job)
+	}
+}
