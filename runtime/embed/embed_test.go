@@ -40,6 +40,31 @@ func NewArgumentTest(i int) *sqlq.JobDescription {
 	return sqlq.NewJobDesc("argument", sqlq.WithParameters(b))
 }
 
+func AdditionTest() sqlq.HandlerFunc {
+	return func(ctx context.Context, job *sqlq.Job) error {
+		var args struct{ A, B int }
+		if err := json.Unmarshal(job.Parameters, &args); err != nil {
+			return err
+		}
+
+		var result = args.A + args.B
+
+		var writer = job.ResultWriter()
+		if err := json.NewEncoder(writer).Encode(&result); err != nil {
+			return err
+		}
+
+		return writer.Close()
+	}
+}
+
+func NewAdditionTest(a, b int) *sqlq.JobDescription {
+	var args = struct{ A, B int }{A: a, B: b}
+	var buf, _ = json.Marshal(&args)
+
+	return sqlq.NewJobDesc("addition", sqlq.WithParameters(buf))
+}
+
 func TestEmbedBasic(t *testing.T) {
 	var upstream = MustOpen(PostgresUrl)
 	defer upstream.Close()
@@ -80,6 +105,30 @@ func TestEmbedWithParams(t *testing.T) {
 	})
 
 	_ = worker.Register("argument", ArgumentTest(100))
+
+	if err := worker.Start(); err != nil {
+		t.Fatalf("failed to start worker: %v", err)
+	}
+
+	time.Sleep(time.Second)
+
+	if err := worker.Shutdown(5 * time.Second); err != nil {
+		t.Fatalf("failed to shutdown worker: %v", err)
+	}
+}
+
+func TestEmbedWithResult(t *testing.T) {
+	// ❗️need to manually confirm this test by checking the database❗️
+
+	var upstream = MustOpen(PostgresUrl)
+	defer upstream.Close()
+
+	_, _ = sqlq.Enqueue(upstream, "embed/default", NewAdditionTest(100, 200))
+	var worker, _ = embed.NewWorker(upstream, embed.WorkerConfig{
+		Queues: []sqlq.Queue{"embed/default"},
+	})
+
+	_ = worker.Register("addition", AdditionTest())
 
 	if err := worker.Start(); err != nil {
 		t.Fatalf("failed to start worker: %v", err)

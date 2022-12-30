@@ -81,7 +81,10 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 
 					// run user defined handler inside a wrapper to catch any panics which might cause the worker to crash
 					var result = make(chan error, 1)
-					go func() { result <- panicWrap(func() error { return fn.Process(jobContext, job) }) }()
+					go func() {
+						job = sqlq.AttachResultWriter(worker.db, job)
+						result <- panicWrap(func() error { return fn.Process(jobContext, job) })
+					}()
 
 					select {
 					// TODO(@riyaz): to implement job timeouts, add a case here that calls cancel()
