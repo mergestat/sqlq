@@ -81,8 +81,9 @@ const (
 type JobDescription struct {
 	typeName     string
 	parameters   []byte
-	runAfter     time.Duration
-	retentionTTL time.Duration
+	runAfter     *time.Duration
+	retentionTTL *time.Duration
+	maxRetries   *int
 }
 
 // NewJobDesc creates a new JobDescription for a job with given typename and with the provided opts.
@@ -101,7 +102,11 @@ func WithParameters(params []byte) func(*JobDescription) {
 
 // WithRetention sets the retention policy for a job. A completed job will be cleaned up after its retention policy expires.
 func WithRetention(dur time.Duration) func(*JobDescription) {
-	return func(desc *JobDescription) { desc.retentionTTL = dur }
+	return func(desc *JobDescription) { desc.retentionTTL = &dur }
+}
+
+func WithMaxRetries(n int) func(*JobDescription) {
+	return func(desc *JobDescription) { desc.maxRetries = &n }
 }
 
 // Job represents an instance of a task / job in a queue.
@@ -121,6 +126,9 @@ type Job struct {
 
 	RunAfter     time.Duration `db:"run_after"`
 	RetentionTTL time.Duration `db:"retention_ttl"`
+
+	MaxRetries int `db:"max_retries"`
+	Attempt    int `db:"attempt"`
 
 	// reference to runtime services; might not be available all the time
 	resultWriter *resultWriter

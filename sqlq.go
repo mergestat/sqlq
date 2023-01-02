@@ -3,6 +3,11 @@ package sqlq
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"math"
+	"math/rand"
+	"strings"
+	"time"
 
 	"github.com/blockloop/scan"
 	"github.com/jackc/pgconn"
@@ -24,6 +29,12 @@ type Connection interface {
 	ExecContext(context.Context, string, ...interface{}) (sql.Result, error)
 }
 
+var (
+	// ErrSkipRetry must be used by the job handler routine to signal
+	// that the job must not be retried (even when there are attempts left)
+	ErrSkipRetry = errors.New("sqlq: skip retry")
+)
+
 // Enqueue enqueues a new job in the given queue based on provided description.
 //
 // The queue is created if it doesn't already exist. By default, a job is created in 'pending' state.
@@ -36,9 +47,31 @@ func Enqueue(cx Connection, queue Queue, desc *JobDescription) (_ *Job, err erro
 		return nil, errors.Wrap(err, "failed to create queue")
 	}
 
+	var i = 0
+	var columns, placeholders, args = make([]string, 0, 6), make([]string, 0, 6), make([]interface{}, 0, 6)
+	var add = func(col string, arg interface{}) {
+		columns, placeholders, args, i = append(columns, col), append(placeholders, fmt.Sprintf("$%d", i+1)), append(args, arg), i+1
+	}
+
+	add("queue", queue)
+	add("typename", desc.typeName)
+	add("parameters", desc.parameters)
+
+	if desc.maxRetries != nil {
+		add("max_retries", desc.maxRetries)
+	}
+
+	if desc.runAfter != nil {
+		add("run_after", desc.runAfter)
+	}
+
+	if desc.retentionTTL != nil {
+		add("retention_ttl", desc.retentionTTL)
+	}
+
 	var rows *sql.Rows
-	const createJob = `INSERT INTO sqlq.jobs (queue, typename, parameters, run_after, retention_ttl) VALUES ($1, $2, $3, $4, $5) RETURNING *`
-	if rows, err = cx.QueryContext(ctx, createJob, queue, desc.typeName, desc.parameters, desc.runAfter, desc.retentionTTL); err != nil {
+	var createJob = `INSERT INTO sqlq.jobs (` + strings.Join(columns, ",") + `) VALUES (` + strings.Join(placeholders, ",") + `) RETURNING *`
+	if rows, err = cx.QueryContext(ctx, createJob, args...); err != nil {
 		return nil, errors.Wrap(err, "failed to enqueue job")
 	}
 
@@ -96,14 +129,17 @@ WITH queues AS (
         WHERE (concurrency IS NULL OR (concurrency - COALESCE(running.count, 0) > 0))
 ), dequeued(id) AS (
     SELECT job.id FROM sqlq.jobs job, queue_with_capacity q
-        WHERE job.status = 'pending' 
+        WHERE job.status = 'pending'
+          AND (job.last_queued_at+make_interval(secs => job.run_after/1e9)) <= NOW() -- value in run_after is stored as nanoseconds
           AND job.queue = q.name 
           AND (ARRAY_LENGTH($2::text[], 1) IS NULL OR job.typename = ANY($2))
     ORDER BY q.priority DESC, job.priority DESC, job.created_at
     LIMIT 1
 )
 UPDATE sqlq.jobs 
-	SET status = 'running'
+	SET status = 'running', 
+	    started_at = NOW(),
+	    attempt = attempt + 1
 FROM dequeued dq
 	WHERE jobs.id = dq.id
 RETURNING jobs.*
@@ -177,15 +213,23 @@ func Success(cx Connection, job *Job) (err error) {
 
 // Error transitions the job to ERROR state and mark it as completed. If the error is retryable (and there are still attempts left),
 // we bump the attempt count and transition it to PENDING to be picked up again by a worker.
-func Error(cx Connection, job *Job, _ error) (err error) {
+func Error(cx Connection, job *Job, userError error) (err error) {
 	var ctx = context.Background()
 
-	// TODO(@riyaz): implement support for retries
-
 	var rows *sql.Rows
-	const markCompleted = `UPDATE sqlq.jobs SET status = $3, completed_at = NOW() WHERE id = $1 AND status = $2 RETURNING *`
-	if rows, err = cx.QueryContext(ctx, markCompleted, job.ID, job.Status, StateErrored); err != nil {
-		return errors.Wrap(err, "failed to mark job as completed")
+	if job.Attempt >= job.MaxRetries || errors.Is(userError, ErrSkipRetry) {
+		const markCompleted = `UPDATE sqlq.jobs SET status = $3, completed_at = NOW() WHERE id = $1 AND status = $2 RETURNING *`
+		if rows, err = cx.QueryContext(ctx, markCompleted, job.ID, job.Status, StateErrored); err != nil {
+			return errors.Wrap(err, "failed to mark job as completed")
+		}
+	} else {
+		// seconds to wait before retrying the job
+		var runAfter = time.Duration(int(math.Pow(float64(job.Attempt), 4))+10+rand.Intn(30)*(job.Attempt+1)) * time.Second
+
+		const markCompleted = `UPDATE sqlq.jobs SET status = $3, last_queued_at = NOW(), run_after = $4 WHERE id = $1 AND status = $2 RETURNING *`
+		if rows, err = cx.QueryContext(ctx, markCompleted, job.ID, job.Status, StatePending, runAfter); err != nil {
+			return errors.Wrap(err, "failed to mark job as completed")
+		}
 	}
 
 	if err = scan.Row(job, rows); err != nil {

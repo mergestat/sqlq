@@ -46,18 +46,13 @@ CREATE TABLE sqlq.jobs
     parameters    JSON        NULL,
     result        JSON        NULL,
 
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT (now()),     -- when the job was first enqueued (not including retries)
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT (now()),     -- when the job was created
     started_at    TIMESTAMPTZ,                              -- when the job last transitioned from PENDING -> RUNNING
     completed_at  TIMESTAMPTZ,                              -- when the job transitioned into a completion state (SUCCESS / ERROR)
 
     -- Seconds after which the task must be executed (regardless of available capacity)
     -- This is used to implement "future execution" of task and exponential back-off retry policies.
     run_after     BIGINT               DEFAULT (0),
-
-    -- TODO(@riyaz): add support for retries
-    --
-    -- max_retries   INT                   DEFAULT (1),
-    -- attempt       INT                   DEFAULT (0),
 
     -- Seconds to retain the output of the job after it has completed before its cleared.
     -- A jobs is cleared by the runtime as soon as NOW() > (completed_at + retention_ttl) WHERE completed_at IS NOT NULL
