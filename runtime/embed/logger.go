@@ -32,7 +32,7 @@ func logger(db *sql.DB) (sqlq.LogBackendAdapter, func() error) {
 		if tx, err = db.Begin(); err != nil {
 			return err
 		}
-		defer tx.Rollback()
+		defer func() { _ = tx.Rollback() }()
 
 		// enable asynchronous commit
 		// see: https://www.postgresql.org/docs/current/wal-async-commit.html
@@ -45,7 +45,7 @@ func logger(db *sql.DB) (sqlq.LogBackendAdapter, func() error) {
 		if stmt, err = tx.Prepare(insertLog); err != nil {
 			return err
 		}
-		defer stmt.Close()
+		defer func() { _ = stmt.Close() }()
 
 		// Read all buffered events and write them to the database.
 		//
