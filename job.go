@@ -132,6 +132,7 @@ type Job struct {
 
 	// reference to runtime services; might not be available all the time
 	resultWriter *resultWriter
+	logger       *Logger
 }
 
 type resultWriter struct {
@@ -177,3 +178,13 @@ func AttachResultWriter(cx Connection, job *Job) *Job {
 	job.resultWriter = &resultWriter{cx: cx, job: job}
 	return job
 }
+
+func (job *Job) Logger() *Logger {
+	if job.logger == nil {
+		// user should not be using Logger() outside a runtime context
+		panic("sqlq: logger not set for the job")
+	}
+	return job.logger
+}
+
+func AttachLogger(be LogBackend, job *Job) *Job { job.logger = NewLogger(job, be); return job }

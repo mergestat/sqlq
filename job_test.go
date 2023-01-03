@@ -3,6 +3,7 @@ package sqlq_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	. "github.com/mergestat/sqlq"
 	"testing"
 )
@@ -40,4 +41,31 @@ func TestJob_ResultWriter(t *testing.T) {
 	if r.Msg != "hello" {
 		t.FailNow()
 	}
+}
+
+func TestJob_Logger(t *testing.T) {
+	var testingBackend = func(t *testing.T) LogBackendAdapter {
+		return func(job *Job, level LogLevel, p string) (int, error) {
+			t.Helper()
+			var msg = fmt.Sprintf("level=%s\tjob=%d\tmsg=%s", level, job.ID, p)
+			t.Log(msg)
+			return len(msg), nil
+		}
+	}
+
+	var err error
+	var upstream = MustOpen(PostgresUrl)
+	defer upstream.Close()
+
+	if _, err = Enqueue(upstream, "test/job", NewJobDesc("job/logger")); err != nil {
+		t.Fatal(err)
+	}
+
+	var job *Job
+	if job, err = Dequeue(upstream, []Queue{"test/job"}); err != nil {
+		t.Fatal(err)
+	}
+
+	job = AttachLogger(testingBackend(t), job)
+	job.Logger().Infof("hello %q", "world")
 }
