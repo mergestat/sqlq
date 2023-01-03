@@ -4,14 +4,14 @@ import (
 	"context"
 	"github.com/mergestat/sqlq"
 	"github.com/pkg/errors"
-	logger "log"
+	stdlog "log"
 	"os"
 	"time"
 )
 
 func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 	// TODO(@riyaz): replace with user-supplied logger
-	var log = logger.New(os.Stderr, "sqlq: ", logger.LstdFlags)
+	var log = stdlog.New(os.Stderr, "sqlq: ", stdlog.LstdFlags)
 	var err error
 
 	// Channels used to communicate with the processor goroutines below
@@ -26,6 +26,9 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 	for name := range worker.handlers {
 		supportedTypes = append(supportedTypes, name)
 	}
+
+	// create a new shared logging backend for jobs
+	var loggingBackend, stopLogger = logger(worker.db)
 
 	go func() {
 		for {
@@ -83,6 +86,8 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 					var result = make(chan error, 1)
 					go func() {
 						job = sqlq.AttachResultWriter(worker.db, job)
+						job = sqlq.AttachLogger(loggingBackend, job)
+
 						result <- panicWrap(func() error { return fn.Process(jobContext, job) })
 					}()
 
@@ -123,6 +128,8 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 		for i := 0; i < cap(sema); i++ {
 			sema <- struct{}{}
 		}
+
+		_ = stopLogger()
 	}
 }
 

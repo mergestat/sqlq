@@ -141,6 +141,42 @@ func TestEmbedWithResult(t *testing.T) {
 	}
 }
 
+func TestEmbedWithLogger(t *testing.T) {
+	var upstream = MustOpen(PostgresUrl)
+	defer upstream.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	var logger = sqlq.HandlerFunc(func(_ context.Context, job *sqlq.Job) error {
+		var log = job.Logger()
+
+		for i := 0; i < 1000; i++ {
+			log.Infof("i: %d", i)
+		}
+
+		wg.Done()
+		return nil
+	})
+
+	_, _ = sqlq.Enqueue(upstream, "embed/default", sqlq.NewJobDesc("logger"))
+	var worker, _ = embed.NewWorker(upstream, embed.WorkerConfig{
+		Queues: []sqlq.Queue{"embed/default"},
+	})
+
+	_ = worker.Register("logger", logger)
+
+	if err := worker.Start(); err != nil {
+		t.Fatalf("failed to start worker: %v", err)
+	}
+
+	wg.Wait()
+
+	if err := worker.Shutdown(5 * time.Second); err != nil {
+		t.Fatalf("failed to shutdown worker: %v", err)
+	}
+}
+
 func setConcurrencyAndPriority(db *sql.DB, queue sqlq.Queue, c, p int) error {
 	result, err := db.Exec("UPDATE sqlq.queues SET concurrency = $2, priority = $3 WHERE queues.name = $1", queue, c, p)
 	if affected, _ := result.RowsAffected(); affected == 0 {
