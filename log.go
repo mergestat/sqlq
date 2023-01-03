@@ -24,25 +24,37 @@ func (i LogLevel) String() string {
 }
 
 const (
+	// DebugLevel is used to log messages at debug level
 	DebugLevel LogLevel = iota
+
+	// InfoLevel is used to log messages at info level
 	InfoLevel
+
+	// WarnLevel is used to log messages at warn level
 	WarnLevel
+
+	// ErrorLevel is used to log messages at error level
 	ErrorLevel
 )
 
+// LogBackend service provides the backend / sink implementation where
+// the log messages are displayed and / or persisted.
 type LogBackend interface {
+	// Write writes the message at given level for the given job
 	Write(job *Job, level LogLevel, msg string) (int, error)
 }
 
+// LogBackendAdapter is a utility type to use complying functions are log backends.
 type LogBackendAdapter func(*Job, LogLevel, string) (int, error)
 
 func (fn LogBackendAdapter) Write(job *Job, level LogLevel, msg string) (int, error) {
 	return fn(job, level, msg)
 }
 
+// Logger is used to log messages from a job's handler to a given backend
 type Logger struct {
-	job *Job
-	be  LogBackend
+	job *Job       // the job under whose context we are logging
+	be  LogBackend // the backend where we send the logs to
 }
 
 // NewLogger returns a new Logger for the given Job,
