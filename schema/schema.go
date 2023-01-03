@@ -34,7 +34,7 @@ func Apply(c *sql.DB) (err error) {
 	sort.Stable(migrations) // sort in ascending order of version number
 
 	var currentVersion = 0
-	const fetchCurrentVersion = "SELECT version FROM sqlq_migrations ORDER BY applied_on DESC LIMIT 1"
+	const fetchCurrentVersion = "SELECT version FROM sqlq_migrations ORDER BY applied_on, version DESC LIMIT 1"
 
 	var rows *sql.Rows
 	if rows, err = tx.Query(fetchCurrentVersion); err != nil && err != sql.ErrNoRows {
