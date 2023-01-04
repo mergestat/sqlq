@@ -143,6 +143,7 @@ type Job struct {
 	// reference to runtime services; might not be available all the time
 	resultWriter *resultWriter
 	logger       *Logger
+	pinger       Pinger
 }
 
 type resultWriter struct {
@@ -189,6 +190,9 @@ func AttachResultWriter(cx Connection, job *Job) *Job {
 	return job
 }
 
+// Logger returns an instance of sqlq.Logger service that manages user-emitted logs
+// for this job. A logger is only available when running in the context of a runtime.
+// Trying to call Logger() in any other context would cause a panic().
 func (job *Job) Logger() *Logger {
 	if job.logger == nil {
 		// user should not be using Logger() outside a runtime context
@@ -197,4 +201,26 @@ func (job *Job) Logger() *Logger {
 	return job.logger
 }
 
-func AttachLogger(be LogBackend, job *Job) *Job { job.logger = NewLogger(job, be); return job }
+// AttachLogger attaches a new Logger to the given job, that logs to the provided backend.
+func AttachLogger(be LogBackend, job *Job) *Job {
+	job.logger = NewLogger(job, be)
+	return job
+}
+
+// Pinger returns an instance of sqlq.Pinger service that sends keepalive pings
+// for the job. A pinger is only available when running in the context of a runtime.
+// Trying to call Pinger() in any other context would cause a panic().
+func (job *Job) Pinger() Pinger {
+	if job.pinger == nil {
+		// user should not be using Pinger() outside a runtime context
+		panic("sqlq: pinger not set for the job")
+	}
+
+	return job.pinger
+}
+
+// AttachPinger attaches a new Pinger to the given job.
+func AttachPinger(cx Connection, job *Job) *Job {
+	job.pinger = pingFn(cx, job)
+	return job
+}
