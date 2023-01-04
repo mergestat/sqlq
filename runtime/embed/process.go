@@ -4,14 +4,14 @@ import (
 	"context"
 	"github.com/mergestat/sqlq"
 	"github.com/pkg/errors"
-	logger "log"
+	stdlog "log"
 	"os"
 	"time"
 )
 
-func process(worker *Worker) (shutdown func(timeout time.Duration)) {
+func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(timeout time.Duration) error) {
 	// TODO(@riyaz): replace with user-supplied logger
-	var log = logger.New(os.Stderr, "sqlq: ", logger.LstdFlags)
+	var log = stdlog.New(os.Stderr, "sqlq: ", stdlog.LstdFlags)
 	var err error
 
 	// Channels used to communicate with the processor goroutines below
@@ -38,7 +38,6 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 			case sema <- struct{}{}:
 				var dequeued *sqlq.Job
 
-				// TODO(@riyaz): filter jobs by limiting to types implemented by the worker
 				if dequeued, err = sqlq.Dequeue(worker.db, worker.queues, sqlq.WithTypeName(supportedTypes)); err != nil {
 					log.Printf("failed to dequeue job: %#v", err)
 					<-sema // release semaphore token
@@ -59,7 +58,7 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 					defer func() { <-sema }() // release semaphore token
 
 					// prepare context for job handler
-					jobContext, cancel := context.WithCancel(context.Background()) // TODO(@riyaz): create a custom context with access to runtime services
+					jobContext, cancel := context.WithCancel(context.Background())
 					defer cancel()
 
 					// check context before starting routine
@@ -83,6 +82,8 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 					var result = make(chan error, 1)
 					go func() {
 						job = sqlq.AttachResultWriter(worker.db, job)
+						job = sqlq.AttachLogger(loggingBackend, job)
+
 						result <- panicWrap(func() error { return fn.Process(jobContext, job) })
 					}()
 
@@ -113,7 +114,7 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 		}
 	}()
 
-	return func(timeout time.Duration) {
+	return func(timeout time.Duration) error {
 		close(quit) // unblock processor waiting on semaphore
 
 		// forcefully terminate jobs that are still running after timeout
@@ -123,6 +124,8 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 		for i := 0; i < cap(sema); i++ {
 			sema <- struct{}{}
 		}
+
+		return nil
 	}
 }
 

@@ -58,7 +58,8 @@ type Worker struct {
 	concurrency int                     // configured worker concurrency
 
 	// TODO(@riyaz): find a better pattern to implement service shutdown
-	stopProcessor func(time.Duration)
+	stopProcessor func(time.Duration) error
+	stopLogger    func() error
 
 	// server's state describe the current status of the server
 	state struct {
@@ -101,7 +102,10 @@ func (worker *Worker) Start() error {
 		worker.state.value = workerStateActive
 	}
 
-	worker.stopProcessor = process(worker)
+	// create a new, shared logging backend
+	var loggingBackend, stopLogger = logger(worker.db)
+	worker.stopLogger = stopLogger
+	worker.stopProcessor = process(worker, loggingBackend)
 	return nil
 }
 
@@ -120,7 +124,8 @@ func (worker *Worker) Shutdown(timeout time.Duration) error {
 		worker.state.mu.Unlock()
 	}
 
-	worker.stopProcessor(timeout)
+	_ = worker.stopProcessor(timeout)
+	_ = worker.stopLogger()
 	return nil
 }
 
