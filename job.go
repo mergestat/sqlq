@@ -81,6 +81,7 @@ const (
 type JobDescription struct {
 	typeName     string
 	parameters   []byte
+	keepAlive    *time.Duration
 	runAfter     *time.Duration
 	retentionTTL *time.Duration
 	maxRetries   *int
@@ -105,8 +106,14 @@ func WithRetention(dur time.Duration) func(*JobDescription) {
 	return func(desc *JobDescription) { desc.retentionTTL = &dur }
 }
 
+// WithMaxRetries sets the maximum retry limit for the job.
 func WithMaxRetries(n int) func(*JobDescription) {
 	return func(desc *JobDescription) { desc.maxRetries = &n }
+}
+
+// WithKeepAlive sets the keepalive ping duration for the job.
+func WithKeepAlive(n time.Duration) func(*JobDescription) {
+	return func(desc *JobDescription) { desc.keepAlive = &n }
 }
 
 // Job represents an instance of a task / job in a queue.
@@ -126,6 +133,9 @@ type Job struct {
 
 	RunAfter     time.Duration `db:"run_after"`
 	RetentionTTL time.Duration `db:"retention_ttl"`
+
+	KeepAlive     time.Duration `db:"keepalive_interval"`
+	LastKeepAlive sql.NullTime  `db:"last_keepalive"`
 
 	MaxRetries int `db:"max_retries"`
 	Attempt    int `db:"attempt"`

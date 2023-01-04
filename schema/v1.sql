@@ -32,7 +32,6 @@ CREATE TABLE sqlq.job_states
 -- A job can also take in a (optional) json input, and can (optionally) emit output as json.
 -- A job's state and input / output are retained until it's retention period after which the runtime clears it (hard delete!).
 --
--- TODO(@riyaz): implement support for keep-alive pings from the worker
 -- TODO(@riyaz): implement support for job timeout
 CREATE TABLE sqlq.jobs
 (
