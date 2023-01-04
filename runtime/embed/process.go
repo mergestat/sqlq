@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func process(worker *Worker) (shutdown func(timeout time.Duration)) {
+func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(timeout time.Duration) error) {
 	// TODO(@riyaz): replace with user-supplied logger
 	var log = stdlog.New(os.Stderr, "sqlq: ", stdlog.LstdFlags)
 	var err error
@@ -27,9 +27,6 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 		supportedTypes = append(supportedTypes, name)
 	}
 
-	// create a new shared logging backend for jobs
-	var loggingBackend, stopLogger = logger(worker.db)
-
 	go func() {
 		for {
 			select {
@@ -41,7 +38,6 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 			case sema <- struct{}{}:
 				var dequeued *sqlq.Job
 
-				// TODO(@riyaz): filter jobs by limiting to types implemented by the worker
 				if dequeued, err = sqlq.Dequeue(worker.db, worker.queues, sqlq.WithTypeName(supportedTypes)); err != nil {
 					log.Printf("failed to dequeue job: %#v", err)
 					<-sema // release semaphore token
@@ -62,7 +58,7 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 					defer func() { <-sema }() // release semaphore token
 
 					// prepare context for job handler
-					jobContext, cancel := context.WithCancel(context.Background()) // TODO(@riyaz): create a custom context with access to runtime services
+					jobContext, cancel := context.WithCancel(context.Background())
 					defer cancel()
 
 					// check context before starting routine
@@ -118,7 +114,7 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 		}
 	}()
 
-	return func(timeout time.Duration) {
+	return func(timeout time.Duration) error {
 		close(quit) // unblock processor waiting on semaphore
 
 		// forcefully terminate jobs that are still running after timeout
@@ -129,7 +125,7 @@ func process(worker *Worker) (shutdown func(timeout time.Duration)) {
 			sema <- struct{}{}
 		}
 
-		_ = stopLogger()
+		return nil
 	}
 }
 
