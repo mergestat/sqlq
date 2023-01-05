@@ -133,6 +133,7 @@ type Job struct {
 
 	RunAfter     time.Duration `db:"run_after"`
 	RetentionTTL time.Duration `db:"retention_ttl"`
+	LastQueuedAt sql.NullTime  `db:"last_queued_at"`
 
 	KeepAlive     time.Duration `db:"keepalive_interval"`
 	LastKeepAlive sql.NullTime  `db:"last_keepalive"`

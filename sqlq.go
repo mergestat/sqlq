@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blockloop/scan"
 	"github.com/jackc/pgconn"
 	"github.com/pkg/errors"
 )
@@ -80,7 +79,7 @@ func Enqueue(cx Connection, queue Queue, desc *JobDescription) (_ *Job, err erro
 	}
 
 	var job Job
-	if err = scan.RowStrict(&job, rows); err != nil {
+	if err = scanJob(rows, &job); err != nil {
 		if err == sql.ErrNoRows { // there must be exactly one row of output!
 			return nil, errors.Errorf("failed to enqueue job")
 		}
@@ -163,7 +162,7 @@ RETURNING jobs.*
 	}
 
 	var job Job
-	if err = scan.Row(&job, rows); err != nil {
+	if err = scanJob(rows, &job); err != nil {
 		if err == sql.ErrNoRows { // no jobs in the queues
 			_ = tx.Commit() // close the transaction
 			return nil, nil
@@ -206,7 +205,7 @@ func Success(cx Connection, job *Job) (err error) {
 		return errors.Wrap(err, "failed to mark job as completed")
 	}
 
-	if err = scan.Row(job, rows); err != nil {
+	if err = scanJob(rows, job); err != nil {
 		if err == sql.ErrNoRows { // job wasn't in the given state?
 			return errors.Wrapf(ErrJobStateMismatch, "expected job to be in %s", job.Status)
 		}
@@ -237,7 +236,7 @@ func Error(cx Connection, job *Job, userError error) (err error) {
 		}
 	}
 
-	if err = scan.Row(job, rows); err != nil {
+	if err = scanJob(rows, job); err != nil {
 		if err == sql.ErrNoRows { // job wasn't in the given state?
 			return errors.Wrapf(ErrJobStateMismatch, "expected job to be in %s", job.Status)
 		}

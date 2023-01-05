@@ -4,7 +4,6 @@ package schema
 import (
 	"database/sql"
 	"embed"
-	"github.com/blockloop/scan"
 	"github.com/pkg/errors"
 	"sort"
 )
@@ -41,8 +40,10 @@ func Apply(c *sql.DB) (err error) {
 		return errors.Wrap(err, "failed to fetch latest migration version")
 	}
 
-	if err = scan.Row(&currentVersion, rows); err != nil && err != sql.ErrNoRows {
-		return errors.Wrap(err, "failed to fetch latest migration version")
+	if rows.Next() {
+		if err = rows.Scan(&currentVersion); err != nil && err != sql.ErrNoRows {
+			return errors.Wrap(err, "failed to fetch latest migration version")
+		}
 	}
 
 	for _, mg := range migrations {
