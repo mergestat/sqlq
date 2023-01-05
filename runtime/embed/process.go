@@ -6,6 +6,7 @@ import (
 	"github.com/pkg/errors"
 	stdlog "log"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -20,6 +21,9 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 	// abort is used to terminate any handler routine that has not completed even after timeout for shutdown has expired
 	var quit, abort = make(chan struct{}), make(chan struct{})
 	var sema = make(chan struct{}, worker.concurrency) // use a semaphore to limit worker concurrency
+
+	//var cancels = make(map[int]context.CancelFunc) // collection of context.CancelFunc for all active jobs
+	var cancels sync.Map
 
 	// prepare list of supported job types
 	var supportedTypes = make([]string, 0, len(worker.handlers))
@@ -59,7 +63,9 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 
 					// prepare context for job handler
 					jobContext, cancel := context.WithCancel(context.Background())
-					defer cancel()
+
+					cancels.Store(job.ID, cancel)
+					defer func() { cancel(); cancels.Delete(job.ID) }()
 
 					// check context before starting routine
 					select {
@@ -83,6 +89,7 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 					go func() {
 						job = sqlq.AttachResultWriter(worker.db, job)
 						job = sqlq.AttachLogger(loggingBackend, job)
+						job = sqlq.AttachPinger(worker.db, job)
 
 						result <- panicWrap(func() error { return fn.Process(jobContext, job) })
 					}()
@@ -94,10 +101,10 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 						if err = sqlq.Error(worker.db, job, errors.New("job aborted")); err != nil {
 							log.Printf("failed to mark job as errored: %#v", err)
 						}
-					case <-jobContext.Done():
-						if err = sqlq.Error(worker.db, job, jobContext.Err()); err != nil {
-							log.Printf("failed to mark job as errored: %#v", err)
-						}
+
+					// case <-jobContext.Done():
+					// 		This case is removed as handling context cancellation is a responsibility of the user-defined routine.
+
 					case resultError := <-result:
 						if resultError != nil {
 							if err = sqlq.Error(worker.db, job, resultError); err != nil {
@@ -118,13 +125,18 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 		close(quit) // unblock processor waiting on semaphore
 
 		// forcefully terminate jobs that are still running after timeout
-		time.AfterFunc(timeout, func() { close(abort) })
+		var timer = time.AfterFunc(timeout, func() { close(abort) })
+
+		// send a graceful shutdown signal to all active jobs by cancelling their contexts.
+		// this provides an opportunity to the user routine to wrap up whatever it is doing and exit.
+		cancels.Range(func(_, fn interface{}) bool { fn.(context.CancelFunc)(); return true })
 
 		// block until all routines have released their tokens
 		for i := 0; i < cap(sema); i++ {
 			sema <- struct{}{}
 		}
 
+		timer.Stop() // everyone has finished, cancel the forceful abort operation
 		return nil
 	}
 }

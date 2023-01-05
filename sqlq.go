@@ -69,6 +69,10 @@ func Enqueue(cx Connection, queue Queue, desc *JobDescription) (_ *Job, err erro
 		add("retention_ttl", desc.retentionTTL)
 	}
 
+	if desc.keepAlive != nil {
+		add("keepalive_interval", desc.keepAlive)
+	}
+
 	var rows *sql.Rows
 	var createJob = `INSERT INTO sqlq.jobs (` + strings.Join(columns, ",") + `) VALUES (` + strings.Join(placeholders, ",") + `) RETURNING *`
 	if rows, err = cx.QueryContext(ctx, createJob, args...); err != nil {
@@ -139,6 +143,7 @@ WITH queues AS (
 UPDATE sqlq.jobs 
 	SET status = 'running', 
 	    started_at = NOW(),
+	    last_keepalive = NOW(),
 	    attempt = attempt + 1
 FROM dequeued dq
 	WHERE jobs.id = dq.id
@@ -240,4 +245,29 @@ func Error(cx Connection, job *Job, userError error) (err error) {
 	}
 
 	return nil
+}
+
+// Reap reaps any zombie process, processes where state is 'running' but the job hasn't pinged in a while, in the given queues.
+// It moves any job with remaining attempts back to the queue while dumping all others in to the errored state.
+func Reap(cx Connection, queues []Queue) (n int64, err error) {
+	var ctx = context.Background()
+
+	const deathReaper = `
+WITH dead AS (
+	SELECT id, attempt, max_retries
+		FROM sqlq.jobs
+	WHERE status = 'running'
+	  AND queue = ANY($1)
+	  AND (NOW() > last_keepalive + make_interval(secs => keepalive_interval / 1e9))
+)
+UPDATE sqlq.jobs
+	SET status = (CASE WHEN dead.attempt < dead.max_retries THEN 'pending' ELSE 'errored' END)
+FROM dead WHERE jobs.id = dead.id`
+
+	var res sql.Result
+	if res, err = cx.ExecContext(ctx, deathReaper, queues); err != nil {
+		return 0, errors.Wrapf(err, "failed to reap zombie processes")
+	}
+
+	return res.RowsAffected()
 }

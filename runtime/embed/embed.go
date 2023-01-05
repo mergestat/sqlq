@@ -60,6 +60,7 @@ type Worker struct {
 	// TODO(@riyaz): find a better pattern to implement service shutdown
 	stopProcessor func(time.Duration) error
 	stopLogger    func() error
+	stopReaper    func() error
 
 	// server's state describe the current status of the server
 	state struct {
@@ -105,6 +106,8 @@ func (worker *Worker) Start() error {
 	// create a new, shared logging backend
 	var loggingBackend, stopLogger = logger(worker.db)
 	worker.stopLogger = stopLogger
+
+	worker.stopReaper = reaper(worker)
 	worker.stopProcessor = process(worker, loggingBackend)
 	return nil
 }
@@ -126,6 +129,7 @@ func (worker *Worker) Shutdown(timeout time.Duration) error {
 
 	_ = worker.stopProcessor(timeout)
 	_ = worker.stopLogger()
+	_ = worker.stopReaper()
 	return nil
 }
 
