@@ -37,4 +37,7 @@ jobs:
         run: go vet ./...
 
       - name: go test
-        run: go test ./... -postgres-url postgres://postgres:password@localhost:5432 -v
+        run: go test ./... -postgres-url postgres://postgres:password@localhost:5432 -v -cover -covermode=count -coverprofile=coverage.out
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
