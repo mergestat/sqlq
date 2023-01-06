@@ -3,7 +3,6 @@ package sqlq
 import (
 	"context"
 	"database/sql"
-	"github.com/blockloop/scan"
 	"github.com/pkg/errors"
 	"time"
 )
@@ -26,7 +25,7 @@ func pingFn(cx Connection, job *Job) Pinger {
 			return errors.Wrapf(err, "failed to send ping")
 		}
 
-		if err = scan.Row(job, rows); err != nil {
+		if err = scanJob(rows, job); err != nil {
 			if err == sql.ErrNoRows { // job wasn't in the given state?
 				return errors.Wrapf(ErrJobStateMismatch, "expected job to be in %s", job.Status)
 			}
