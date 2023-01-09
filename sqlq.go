@@ -260,7 +260,7 @@ WITH dead AS (
 	  AND (NOW() > last_keepalive + make_interval(secs => keepalive_interval / 1e9))
 )
 UPDATE sqlq.jobs
-	SET status = (CASE WHEN dead.attempt < dead.max_retries THEN 'pending' ELSE 'errored' END)
+	SET status = (CASE WHEN dead.attempt < dead.max_retries THEN 'pending'::sqlq.job_states ELSE 'errored'::sqlq.job_states END)
 FROM dead WHERE jobs.id = dead.id`
 
 	var res sql.Result

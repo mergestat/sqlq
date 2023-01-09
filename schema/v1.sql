@@ -18,11 +18,7 @@ CREATE TABLE sqlq.queues
 -- Table: sqlq.job_states
 -- Jobs states is an enumeration of all possible states a job can be in.
 -- It is used to implement a job's state machine.
-CREATE TABLE sqlq.job_states
-(
-    name        TEXT PRIMARY KEY,
-    description TEXT
-);
+CREATE TYPE sqlq.job_states AS ENUM ('pending', 'running', 'success', 'errored');
 
 -- Table: sqlq.jobs
 -- Jobs represent a job / task to execute in background, asynchronously. Jobs are enqueued to a queue
@@ -35,41 +31,29 @@ CREATE TABLE sqlq.job_states
 -- TODO(@riyaz): implement support for job timeout
 CREATE TABLE sqlq.jobs
 (
-    id            BIGSERIAL PRIMARY KEY,                    -- unique identifier for the job in the system
-    queue         TEXT        NOT NULL,                     -- the queue this job belongs to
-    typename      TEXT        NOT NULL,                     -- typename of the job registered with the runtime
-    status        TEXT        NOT NULL DEFAULT ('pending'), -- state of a job in its state machine
-    priority      INT         NOT NULL DEFAULT (1),         -- the job's priority within the queue
+    id            BIGSERIAL PRIMARY KEY,                        -- unique identifier for the job in the system
+    queue         TEXT            NOT NULL,                     -- the queue this job belongs to
+    typename      TEXT            NOT NULL,                     -- typename of the job registered with the runtime
+    status        sqlq.job_states NOT NULL DEFAULT ('pending'), -- state of a job in its state machine
+    priority      INT             NOT NULL DEFAULT (1),         -- the job's priority within the queue
 
     -- job's input and output
-    parameters    JSON        NULL,
-    result        JSON        NULL,
+    parameters    JSON            NULL,
+    result        JSON            NULL,
 
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT (now()),     -- when the job was created
-    started_at    TIMESTAMPTZ,                              -- when the job last transitioned from PENDING -> RUNNING
-    completed_at  TIMESTAMPTZ,                              -- when the job transitioned into a completion state (SUCCESS / ERROR)
+    created_at    TIMESTAMPTZ     NOT NULL DEFAULT (now()),     -- when the job was created
+    started_at    TIMESTAMPTZ,                                  -- when the job last transitioned from PENDING -> RUNNING
+    completed_at  TIMESTAMPTZ,                                  -- when the job transitioned into a completion state (SUCCESS / ERROR)
 
     -- Seconds after which the task must be executed (regardless of available capacity)
     -- This is used to implement "future execution" of task and exponential back-off retry policies.
-    run_after     BIGINT               DEFAULT (0),
+    run_after     BIGINT                   DEFAULT (0),
 
     -- Seconds to retain the output of the job after it has completed before its cleared.
     -- A jobs is cleared by the runtime as soon as NOW() > (completed_at + retention_ttl) WHERE completed_at IS NOT NULL
-    retention_ttl BIGINT      NOT NULL DEFAULT (0),
+    retention_ttl BIGINT          NOT NULL DEFAULT (0),
 
     -- Queue references sqlq.queue entry.
     -- We have an ON DELETE CASCADE to remove a job when the queue is deleted.
-    --
-    -- @riyaz: not much useful since we have soft-delete but still good to have
-    FOREIGN KEY (queue) REFERENCES sqlq.queues (name) ON DELETE CASCADE,
-
-    -- Status references on of the statuses defined in sqlq.job_states.
-    FOREIGN KEY (status) REFERENCES sqlq.job_states (name)
+    FOREIGN KEY (queue) REFERENCES sqlq.queues (name) ON DELETE CASCADE
 );
-
--- seed sqlq.job_states with the default states
-INSERT INTO sqlq.job_states (name, description)
-VALUES ('pending', 'The job is enqueued and is ready to be picked by a worker'),
-       ('running', 'The job is picked by a worker and is executing'),
-       ('success', 'The job has successfully completed execution'),
-       ('errored', 'The job execution has failed');
