@@ -120,35 +120,8 @@ retry:
 		return nil, errors.Wrap(err, "failed to start transaction")
 	}
 
-	const dequeue = `
-WITH queues AS (
-    SELECT name, concurrency, priority FROM sqlq.queues WHERE name = ANY ($1)
-), running (name, count) AS (
-    SELECT queue, COUNT(*) FROM sqlq.jobs, queues  
-		WHERE jobs.queue = queues.name AND status = 'running'
-	GROUP BY queue
-), queue_with_capacity AS (
-    SELECT queues.name, queues.priority FROM queues LEFT OUTER JOIN running USING(name)
-        WHERE (concurrency IS NULL OR (concurrency - COALESCE(running.count, 0) > 0))
-), dequeued(id) AS (
-    SELECT job.id FROM sqlq.jobs job, queue_with_capacity q
-        WHERE job.status = 'pending'
-          AND (job.last_queued_at+make_interval(secs => job.run_after/1e9)) <= NOW() -- value in run_after is stored as nanoseconds
-          AND job.queue = q.name 
-          AND (ARRAY_LENGTH($2::text[], 1) IS NULL OR job.typename = ANY($2))
-    ORDER BY q.priority DESC, job.priority DESC, job.created_at
-    LIMIT 1
-)
-UPDATE sqlq.jobs 
-	SET status = 'running', 
-	    started_at = NOW(),
-	    last_keepalive = NOW(),
-	    attempt = attempt + 1
-FROM dequeued dq
-	WHERE jobs.id = dq.id
-RETURNING jobs.*
-`
 	var rows *sql.Rows
+	const dequeue = `SELECT * FROM sqlq.dequeue_job($1, $2)`
 	if rows, err = tx.QueryContext(ctx, dequeue, queues, filters.typeName); err != nil {
 		_ = tx.Rollback()
 
