@@ -66,7 +66,7 @@ $$ LANGUAGE plpgsql VOLATILE;
 
 -- Function: sqlq.reap()
 --
--- SQLQ.REAP() reaps any zombie process, processes where state is 'running' but the job hasn't pinged in a while, in the given queues.
+-- SQLQ.REAP() reaps any zombie process, processes where state is 'running' but the job hasn't pinged in a while (determined by the `keepalive_interval` defined on the job), in the given queues.
 -- It moves any job with remaining attempts back to the queue while dumping all others in to the errored state.
 CREATE FUNCTION sqlq.reap(queues TEXT[]) RETURNS integer AS $$
 DECLARE
