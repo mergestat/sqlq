@@ -33,6 +33,37 @@ CREATE FUNCTION sqlq.dequeue_job(queues TEXT[], jobTypes TEXT[]) RETURNS SETOF s
     RETURNING jobs.*
 $$ LANGUAGE SQL;
 
+-- Function: sqlq.mark_success
+--
+-- SQLQ.MARK_SUCCESS() transitions the job to 'success' state and mark it as completed.
+CREATE FUNCTION sqlq.mark_success(id INTEGER, expectedState SQLQ.JOB_STATES)
+RETURNS SETOF sqlq.jobs AS $$
+BEGIN
+    RETURN QUERY UPDATE sqlq.jobs SET status = 'success', completed_at = NOW()
+        WHERE jobs.id = $1 AND status = $2
+    RETURNING *;
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+
+-- Function: sqlq.mark_failed
+--
+-- SQLQ.MARK_FAILED() transitions the job to ERROR state and mark it as completed. If the error is retryable
+-- (and there are still attempts left), we transition it to PENDING to be picked up again by a worker.
+CREATE FUNCTION sqlq.mark_failed(id INTEGER, expectedState SQLQ.JOB_STATES, retry BOOLEAN = false, run_after BIGINT = 0)
+RETURNS SETOF sqlq.jobs AS $$
+BEGIN
+    IF retry THEN
+        RETURN QUERY
+            UPDATE sqlq.jobs SET status = 'pending', last_queued_at = NOW(), run_after = $4
+                WHERE jobs.id = $1 AND status = $2 RETURNING *;
+    ELSE
+        RETURN QUERY
+            UPDATE sqlq.jobs SET status = 'errored', completed_at = NOW()
+                WHERE jobs.id = $1 AND status = $2 RETURNING *;
+    END IF;
+END;
+$$ LANGUAGE plpgsql VOLATILE;
+
 -- Function: sqlq.reap()
 --
 -- SQLQ.REAP() reaps any zombie process, processes where state is 'running' but the job hasn't pinged in a while, in the given queues.

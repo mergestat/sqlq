@@ -173,8 +173,8 @@ func Success(cx Connection, job *Job) (err error) {
 	var ctx = context.Background()
 
 	var rows *sql.Rows
-	const markCompleted = `UPDATE sqlq.jobs SET status = $3, completed_at = NOW() WHERE id = $1 AND status = $2 RETURNING *`
-	if rows, err = cx.QueryContext(ctx, markCompleted, job.ID, job.Status, StateSuccess); err != nil {
+	const markCompleted = `SELECT * FROM sqlq.mark_success($1, $2)`
+	if rows, err = cx.QueryContext(ctx, markCompleted, job.ID, job.Status); err != nil {
 		return errors.Wrap(err, "failed to mark job as completed")
 	}
 
@@ -193,20 +193,13 @@ func Success(cx Connection, job *Job) (err error) {
 func Error(cx Connection, job *Job, userError error) (err error) {
 	var ctx = context.Background()
 
-	var rows *sql.Rows
-	if job.Attempt >= job.MaxRetries || errors.Is(userError, ErrSkipRetry) {
-		const markCompleted = `UPDATE sqlq.jobs SET status = $3, completed_at = NOW() WHERE id = $1 AND status = $2 RETURNING *`
-		if rows, err = cx.QueryContext(ctx, markCompleted, job.ID, job.Status, StateErrored); err != nil {
-			return errors.Wrap(err, "failed to mark job as completed")
-		}
-	} else {
-		// seconds to wait before retrying the job
-		var runAfter = time.Duration(int(math.Pow(float64(job.Attempt), 4))+10+rand.Intn(30)*(job.Attempt+1)) * time.Second
+	var retry = job.Attempt < job.MaxRetries && !errors.Is(userError, ErrSkipRetry)
+	var runAfter = time.Duration(int(math.Pow(float64(job.Attempt), 4))+10+rand.Intn(30)*(job.Attempt+1)) * time.Second
 
-		const markCompleted = `UPDATE sqlq.jobs SET status = $3, last_queued_at = NOW(), run_after = $4 WHERE id = $1 AND status = $2 RETURNING *`
-		if rows, err = cx.QueryContext(ctx, markCompleted, job.ID, job.Status, StatePending, runAfter); err != nil {
-			return errors.Wrap(err, "failed to mark job as completed")
-		}
+	var rows *sql.Rows
+	const updateState = `SELECT * FROM sqlq.mark_failed($1, $2, $3, $4)`
+	if rows, err = cx.QueryContext(ctx, updateState, job.ID, job.Status, retry, runAfter); err != nil {
+		return errors.Wrap(err, "failed to mark job as completed")
 	}
 
 	if err = scanJob(rows, job); err != nil {
