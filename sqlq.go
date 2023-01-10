@@ -224,22 +224,18 @@ func Error(cx Connection, job *Job, userError error) (err error) {
 func Reap(cx Connection, queues []Queue) (n int64, err error) {
 	var ctx = context.Background()
 
-	const deathReaper = `
-WITH dead AS (
-	SELECT id, attempt, max_retries
-		FROM sqlq.jobs
-	WHERE status = 'running'
-	  AND queue = ANY($1)
-	  AND (NOW() > last_keepalive + make_interval(secs => keepalive_interval / 1e9))
-)
-UPDATE sqlq.jobs
-	SET status = (CASE WHEN dead.attempt < dead.max_retries THEN 'pending'::sqlq.job_states ELSE 'errored'::sqlq.job_states END)
-FROM dead WHERE jobs.id = dead.id`
-
-	var res sql.Result
-	if res, err = cx.ExecContext(ctx, deathReaper, queues); err != nil {
+	var rows *sql.Rows
+	const deathReaper = `SELECT * FROM sqlq.reap($1)`
+	if rows, err = cx.QueryContext(ctx, deathReaper, queues); err != nil {
 		return 0, errors.Wrapf(err, "failed to reap zombie processes")
 	}
+	defer rows.Close()
 
-	return res.RowsAffected()
+	if rows.Next() {
+		if err = rows.Scan(&n); err != nil {
+			return 0, errors.Wrapf(err, "failed to reap zombie processes")
+		}
+	}
+
+	return n, rows.Err()
 }
