@@ -15,5 +15,8 @@ CREATE TABLE sqlq.job_logs
     job       BIGINT,                      -- job this log belongs to
     logged_at TIMESTAMPTZ DEFAULT (now()), -- time at which this message was logged into the database
     level     sqlq.log_level,              -- log level for this message
-    message   TEXT                         -- text content of the log message
+    message   TEXT,                        -- text content of the log message
+
+    -- Job this log belongs to.
+    FOREIGN KEY (job) REFERENCES sqlq.jobs (id) ON DELETE CASCADE
 );
