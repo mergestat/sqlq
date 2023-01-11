@@ -120,35 +120,8 @@ retry:
 		return nil, errors.Wrap(err, "failed to start transaction")
 	}
 
-	const dequeue = `
-WITH queues AS (
-    SELECT name, concurrency, priority FROM sqlq.queues WHERE name = ANY ($1)
-), running (name, count) AS (
-    SELECT queue, COUNT(*) FROM sqlq.jobs, queues  
-		WHERE jobs.queue = queues.name AND status = 'running'
-	GROUP BY queue
-), queue_with_capacity AS (
-    SELECT queues.name, queues.priority FROM queues LEFT OUTER JOIN running USING(name)
-        WHERE (concurrency IS NULL OR (concurrency - COALESCE(running.count, 0) > 0))
-), dequeued(id) AS (
-    SELECT job.id FROM sqlq.jobs job, queue_with_capacity q
-        WHERE job.status = 'pending'
-          AND (job.last_queued_at+make_interval(secs => job.run_after/1e9)) <= NOW() -- value in run_after is stored as nanoseconds
-          AND job.queue = q.name 
-          AND (ARRAY_LENGTH($2::text[], 1) IS NULL OR job.typename = ANY($2))
-    ORDER BY q.priority DESC, job.priority DESC, job.created_at
-    LIMIT 1
-)
-UPDATE sqlq.jobs 
-	SET status = 'running', 
-	    started_at = NOW(),
-	    last_keepalive = NOW(),
-	    attempt = attempt + 1
-FROM dequeued dq
-	WHERE jobs.id = dq.id
-RETURNING jobs.*
-`
 	var rows *sql.Rows
+	const dequeue = `SELECT * FROM sqlq.dequeue_job($1, $2)`
 	if rows, err = tx.QueryContext(ctx, dequeue, queues, filters.typeName); err != nil {
 		_ = tx.Rollback()
 
@@ -200,8 +173,8 @@ func Success(cx Connection, job *Job) (err error) {
 	var ctx = context.Background()
 
 	var rows *sql.Rows
-	const markCompleted = `UPDATE sqlq.jobs SET status = $3, completed_at = NOW() WHERE id = $1 AND status = $2 RETURNING *`
-	if rows, err = cx.QueryContext(ctx, markCompleted, job.ID, job.Status, StateSuccess); err != nil {
+	const markCompleted = `SELECT * FROM sqlq.mark_success($1, $2)`
+	if rows, err = cx.QueryContext(ctx, markCompleted, job.ID, job.Status); err != nil {
 		return errors.Wrap(err, "failed to mark job as completed")
 	}
 
@@ -220,20 +193,13 @@ func Success(cx Connection, job *Job) (err error) {
 func Error(cx Connection, job *Job, userError error) (err error) {
 	var ctx = context.Background()
 
-	var rows *sql.Rows
-	if job.Attempt >= job.MaxRetries || errors.Is(userError, ErrSkipRetry) {
-		const markCompleted = `UPDATE sqlq.jobs SET status = $3, completed_at = NOW() WHERE id = $1 AND status = $2 RETURNING *`
-		if rows, err = cx.QueryContext(ctx, markCompleted, job.ID, job.Status, StateErrored); err != nil {
-			return errors.Wrap(err, "failed to mark job as completed")
-		}
-	} else {
-		// seconds to wait before retrying the job
-		var runAfter = time.Duration(int(math.Pow(float64(job.Attempt), 4))+10+rand.Intn(30)*(job.Attempt+1)) * time.Second
+	var retry = job.Attempt < job.MaxRetries && !errors.Is(userError, ErrSkipRetry)
+	var runAfter = time.Duration(int(math.Pow(float64(job.Attempt), 4))+10+rand.Intn(30)*(job.Attempt+1)) * time.Second
 
-		const markCompleted = `UPDATE sqlq.jobs SET status = $3, last_queued_at = NOW(), run_after = $4 WHERE id = $1 AND status = $2 RETURNING *`
-		if rows, err = cx.QueryContext(ctx, markCompleted, job.ID, job.Status, StatePending, runAfter); err != nil {
-			return errors.Wrap(err, "failed to mark job as completed")
-		}
+	var rows *sql.Rows
+	const updateState = `SELECT * FROM sqlq.mark_failed($1, $2, $3, $4)`
+	if rows, err = cx.QueryContext(ctx, updateState, job.ID, job.Status, retry, runAfter); err != nil {
+		return errors.Wrap(err, "failed to mark job as completed")
 	}
 
 	if err = scanJob(rows, job); err != nil {
@@ -251,22 +217,18 @@ func Error(cx Connection, job *Job, userError error) (err error) {
 func Reap(cx Connection, queues []Queue) (n int64, err error) {
 	var ctx = context.Background()
 
-	const deathReaper = `
-WITH dead AS (
-	SELECT id, attempt, max_retries
-		FROM sqlq.jobs
-	WHERE status = 'running'
-	  AND queue = ANY($1)
-	  AND (NOW() > last_keepalive + make_interval(secs => keepalive_interval / 1e9))
-)
-UPDATE sqlq.jobs
-	SET status = (CASE WHEN dead.attempt < dead.max_retries THEN 'pending'::sqlq.job_states ELSE 'errored'::sqlq.job_states END)
-FROM dead WHERE jobs.id = dead.id`
-
-	var res sql.Result
-	if res, err = cx.ExecContext(ctx, deathReaper, queues); err != nil {
+	var rows *sql.Rows
+	const deathReaper = `SELECT * FROM sqlq.reap($1)`
+	if rows, err = cx.QueryContext(ctx, deathReaper, queues); err != nil {
 		return 0, errors.Wrapf(err, "failed to reap zombie processes")
 	}
+	defer rows.Close()
 
-	return res.RowsAffected()
+	if rows.Next() {
+		if err = rows.Scan(&n); err != nil {
+			return 0, errors.Wrapf(err, "failed to reap zombie processes")
+		}
+	}
+
+	return n, rows.Err()
 }
