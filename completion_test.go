@@ -1,7 +1,9 @@
 package sqlq_test
 
 import (
+	"database/sql"
 	"math/rand"
+	"reflect"
 	"testing"
 	"time"
 
@@ -121,14 +123,31 @@ func TestCancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var job *Job
-	if job, err = Dequeue(upstream, []Queue{"test/cancelled"}); err != nil {
+	if _, err = Dequeue(upstream, []Queue{"test/cancelled"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := upstream.Exec("UPDATE sqlq.jobs SET status ='cancelling' WHERE typename = $1", "test/cancelled"); err != nil {
 		t.Fatal(err)
 	}
 
-	time.Sleep(job.KeepAlive) // wait for the keepalive time to pass
+	{
+		time.After(5 * time.Second)
+		var res *sql.Rows
 
+		if res, err = upstream.Query("SELECT * FROM sqlq.jobs WHERE status = 'cancelling'"); err != nil {
+			t.Fatal(err)
+		}
+		var cancelledJob *Job
+
+		if res.Next() {
+			if err = res.Scan(&cancelledJob); err != nil {
+				t.Fatalf("failed to scan rows")
+
+			}
+		}
+
+		if reflect.DeepEqual(cancelledJob, Job{}) {
+			t.Errorf("Failed to pickup cancelling jobs")
+		}
+	}
 }
