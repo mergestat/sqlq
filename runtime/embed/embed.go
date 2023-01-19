@@ -6,11 +6,12 @@ package embed
 
 import (
 	"database/sql"
-	"github.com/mergestat/sqlq"
-	"github.com/pkg/errors"
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/mergestat/sqlq"
+	"github.com/pkg/errors"
 )
 
 type WorkerConfig struct {

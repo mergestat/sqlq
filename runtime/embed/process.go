@@ -2,12 +2,14 @@ package embed
 
 import (
 	"context"
-	"github.com/mergestat/sqlq"
-	"github.com/pkg/errors"
+	"database/sql"
 	stdlog "log"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/mergestat/sqlq"
+	"github.com/pkg/errors"
 )
 
 func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(timeout time.Duration) error) {
@@ -19,7 +21,8 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 	//
 	// quit is used to unblock the primary goroutine waiting on semaphore
 	// abort is used to terminate any handler routine that has not completed even after timeout for shutdown has expired
-	var quit, abort = make(chan struct{}), make(chan struct{})
+	// cancelled is used to terminate the job routine that have a status equal to cancelling
+	var quit, abort, cancelled = make(chan struct{}), make(chan struct{}), make(chan struct{})
 	var sema = make(chan struct{}, worker.concurrency) // use a semaphore to limit worker concurrency
 
 	//var cancels = make(map[int]context.CancelFunc) // collection of context.CancelFunc for all active jobs
@@ -94,6 +97,42 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 						result <- panicWrap(func() error { return fn.Process(jobContext, job) })
 					}()
 
+					// we run a polling checking every 3 secongs whether the job have a
+					// cancelling status if so we change it's status to cancelled.
+					go func() {
+						var poll = func(job *sqlq.Job) (r int64, err error) {
+							var tx *sql.Tx
+							var rows int64
+							if tx, err = worker.db.Begin(); err != nil {
+								return 0, err
+							}
+							defer func() { _ = tx.Rollback() }()
+
+							if rows, err = sqlq.Cancelling(tx, job); err != nil {
+								return 0, err
+							}
+
+							err = tx.Commit()
+							return rows, err
+						}
+
+						for {
+							select {
+							case <-time.After(3 * time.Second):
+								var rows int64
+								if rows, err = poll(job); err != nil {
+									log.Printf("failed to : %#v", err)
+									return
+								}
+
+								if rows > 0 {
+									<-cancelled
+								}
+
+							}
+						}
+					}()
+
 					select {
 					// TODO(@riyaz): to implement job timeouts, add a case here that calls cancel()
 					case <-abort:
@@ -102,9 +141,11 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 							log.Printf("failed to mark job as errored: %#v", err)
 						}
 
+					case <-cancelled:
+						cancel()
+
 					// case <-jobContext.Done():
 					// 		This case is removed as handling context cancellation is a responsibility of the user-defined routine.
-
 					case resultError := <-result:
 						if resultError != nil {
 							if err = sqlq.Error(worker.db, job, resultError); err != nil {

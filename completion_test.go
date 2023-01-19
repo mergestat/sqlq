@@ -1,11 +1,12 @@
 package sqlq_test
 
 import (
-	. "github.com/mergestat/sqlq"
-	"github.com/pkg/errors"
 	"math/rand"
 	"testing"
 	"time"
+
+	. "github.com/mergestat/sqlq"
+	"github.com/pkg/errors"
 )
 
 func TestSuccess(t *testing.T) {
@@ -107,4 +108,27 @@ func TestRetry(t *testing.T) {
 	if job.ID != lastId {
 		t.Fatalf("got a different job!")
 	}
+}
+
+func TestCancelled(t *testing.T) {
+	var err error
+
+	var upstream = MustOpen(PostgresUrl)
+
+	defer upstream.Close()
+
+	if _, err = Enqueue(upstream, "test/cancelled", NewAdditionJob(rand.Int(), rand.Int())); err != nil {
+		t.Fatal(err)
+	}
+
+	var job *Job
+	if job, err = Dequeue(upstream, []Queue{"test/cancelled"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := upstream.Exec("UPDATE sqlq.jobs SET status ='cancelling' WHERE typename = $1", "test/cancelled"); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(job.KeepAlive) // wait for the keepalive time to pass
+
 }

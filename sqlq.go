@@ -168,6 +168,23 @@ retry:
 	return &job, nil
 }
 
+func Cancelling(cx Connection, job *Job) (n int64, err error) {
+	var ctx = context.Background()
+	var res sql.Result
+
+	const cancelJob = `
+	UPDATE sqlq.jobs
+		SET status = 'cancelled',
+		completed_at = NOW()
+	WHERE id =$1 AND status = 'cancelling'`
+
+	if res, err = cx.ExecContext(ctx, cancelJob, job.ID); err != nil {
+		return 0, errors.Wrapf(err, "failed to executed cancel operation")
+	}
+
+	return res.RowsAffected()
+}
+
 // Success transitions the job to SUCCESS state and mark it as completed.
 func Success(cx Connection, job *Job) (err error) {
 	var ctx = context.Background()
