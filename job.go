@@ -8,6 +8,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -124,11 +125,11 @@ func WithKeepAlive(n time.Duration) func(*JobDescription) {
 
 // Job represents an instance of a task / job in a queue.
 type Job struct {
-	ID       int      `db:"id"`
-	Queue    Queue    `db:"queue"`
-	TypeName string   `db:"typename"`
-	Priority int      `db:"priority"`
-	Status   JobState `db:"status"`
+	ID       uuid.UUID `db:"id"`
+	Queue    Queue     `db:"queue"`
+	TypeName string    `db:"typename"`
+	Priority int       `db:"priority"`
+	Status   JobState  `db:"status"`
 
 	Parameters []byte `db:"parameters"`
 	Result     []byte `db:"result"`
