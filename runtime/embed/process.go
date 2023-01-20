@@ -108,7 +108,7 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 							}
 							defer func() { _ = tx.Rollback() }()
 
-							if rows, err = sqlq.Cancelling(tx, job); err != nil {
+							if rows, err = sqlq.Cancelled(tx, job); err != nil {
 								return 0, err
 							}
 
@@ -116,7 +116,9 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 							return rows, err
 						}
 
+						//lint:ignore S1000 we want to make sure we use a for loop instead a for range loop
 						for {
+							//lint:ignore S1037 we don't want to sleep the context, instead we want to wait 3 seconds for this to execute
 							select {
 							case <-time.After(3 * time.Second):
 								var rows int64

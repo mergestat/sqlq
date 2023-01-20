@@ -1,4 +1,5 @@
-
+-- Migration to change  jobs primary key to UUID and all tables dependant of it.
+-- We create an extension to use a random UUID as default each time we create the column.
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 BEGIN;

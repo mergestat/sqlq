@@ -168,7 +168,8 @@ retry:
 	return &job, nil
 }
 
-func Cancelling(cx Connection, job *Job) (n int64, err error) {
+// Cancelled transitions the job to CANCELLED state and mark it as completed
+func Cancelled(cx Connection, job *Job) (n int64, err error) {
 	var ctx = context.Background()
 	var res sql.Result
 
