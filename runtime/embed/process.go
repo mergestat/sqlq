@@ -2,7 +2,6 @@ package embed
 
 import (
 	"context"
-	"database/sql"
 	stdlog "log"
 	"os"
 	"sync"
@@ -21,8 +20,7 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 	//
 	// quit is used to unblock the primary goroutine waiting on semaphore
 	// abort is used to terminate any handler routine that has not completed even after timeout for shutdown has expired
-	// cancelled is used to terminate the job routine that have a status equal to cancelling
-	var quit, abort, cancelled = make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var quit, abort = make(chan struct{}), make(chan struct{})
 	var sema = make(chan struct{}, worker.concurrency) // use a semaphore to limit worker concurrency
 
 	//var cancels = make(map[int]context.CancelFunc) // collection of context.CancelFunc for all active jobs
@@ -62,6 +60,9 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 				// launch another goroutine to supervise the task in background
 				// we launch one more goroutine within this where the actual handler is invoked
 				go func(job *sqlq.Job) {
+					// cancelled is used to terminate the job routine that have a status equal to cancelling
+					var cancelled = make(chan struct{})
+
 					defer func() { <-sema }() // release semaphore token
 
 					// prepare context for job handler
@@ -87,6 +88,28 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 						panic(errors.Errorf("sqlq: type (%q) not supported but got picked", job.TypeName))
 					}
 
+					// we run a polling checking every 3 secongs whether the job have a
+					// cancelling status if so we change it's status to cancelled.
+					go func() {
+						ticker := time.NewTicker(3 * time.Second)
+						for {
+							select {
+							case <-jobContext.Done():
+								ticker.Stop()
+								return
+							case <-ticker.C:
+								var isCancelled bool
+								if isCancelled, err = sqlq.IsCancelled(worker.db, job); err != nil {
+									log.Printf("failed to : %#v", err)
+								}
+
+								if isCancelled {
+									close(cancelled)
+								}
+							}
+						}
+					}()
+
 					// run user defined handler inside a wrapper to catch any panics which might cause the worker to crash
 					var result = make(chan error, 1)
 					go func() {
@@ -95,44 +118,6 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 						job = sqlq.AttachPinger(worker.db, job)
 
 						result <- panicWrap(func() error { return fn.Process(jobContext, job) })
-					}()
-
-					// we run a polling checking every 3 secongs whether the job have a
-					// cancelling status if so we change it's status to cancelled.
-					go func() {
-						var poll = func(job *sqlq.Job) (r int64, err error) {
-							var tx *sql.Tx
-							var rows int64
-							if tx, err = worker.db.Begin(); err != nil {
-								return 0, err
-							}
-							defer func() { _ = tx.Rollback() }()
-
-							if rows, err = sqlq.Cancelled(tx, job); err != nil {
-								return 0, err
-							}
-
-							err = tx.Commit()
-							return rows, err
-						}
-
-						//lint:ignore S1000 we want to make sure we use a for loop instead a for range loop
-						for {
-							//lint:ignore S1037 we don't want to sleep the context, instead we want to wait 3 seconds for this to execute
-							select {
-							case <-time.After(3 * time.Second):
-								var rows int64
-								if rows, err = poll(job); err != nil {
-									log.Printf("failed to : %#v", err)
-									return
-								}
-
-								if rows > 0 {
-									<-cancelled
-								}
-
-							}
-						}
 					}()
 
 					select {
@@ -144,6 +129,11 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 						}
 
 					case <-cancelled:
+						if err = sqlq.Cancelled(worker.db, job); err != nil {
+							log.Printf("failed to mark job as cancelled: %#v", err)
+						}
+						// We need cancel the context after mark the job  as cancelled, otherwise it'd would
+						// cause the user's routine to return an error which would then mark the job as errored rather than cancelled
 						cancel()
 
 					// case <-jobContext.Done():

@@ -18,7 +18,7 @@ CREATE TABLE sqlq.queues
 -- Table: sqlq.job_states
 -- Jobs states is an enumeration of all possible states a job can be in.
 -- It is used to implement a job's state machine.
-CREATE TYPE sqlq.job_states AS ENUM ('pending', 'running', 'success', 'errored','cancelling','cancelled');
+CREATE TYPE sqlq.job_states AS ENUM ('pending', 'running', 'success', 'errored');
 
 -- Table: sqlq.jobs
 -- Jobs represent a job / task to execute in background, asynchronously. Jobs are enqueued to a queue

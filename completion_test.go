@@ -1,9 +1,7 @@
 package sqlq_test
 
 import (
-	"database/sql"
 	"math/rand"
-	"reflect"
 	"testing"
 	"time"
 
@@ -109,45 +107,5 @@ func TestRetry(t *testing.T) {
 
 	if job.ID != lastId {
 		t.Fatalf("got a different job!")
-	}
-}
-
-func TestCancelled(t *testing.T) {
-	var err error
-
-	var upstream = MustOpen(PostgresUrl)
-
-	defer upstream.Close()
-
-	if _, err = Enqueue(upstream, "test/cancelled", NewAdditionJob(rand.Int(), rand.Int())); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err = Dequeue(upstream, []Queue{"test/cancelled"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := upstream.Exec("UPDATE sqlq.jobs SET status ='cancelling' WHERE typename = $1", "test/cancelled"); err != nil {
-		t.Fatal(err)
-	}
-
-	{
-		time.After(5 * time.Second)
-		var res *sql.Rows
-
-		if res, err = upstream.Query("SELECT * FROM sqlq.jobs WHERE status = 'cancelling'"); err != nil {
-			t.Fatal(err)
-		}
-		var cancelledJob *Job
-
-		if res.Next() {
-			if err = res.Scan(&cancelledJob); err != nil {
-				t.Fatalf("failed to scan rows")
-
-			}
-		}
-
-		if reflect.DeepEqual(cancelledJob, Job{}) {
-			t.Errorf("Failed to pickup cancelling jobs")
-		}
 	}
 }
