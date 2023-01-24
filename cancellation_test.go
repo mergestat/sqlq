@@ -25,7 +25,7 @@ func TestCancelled(t *testing.T) {
 		Queues: []sqlq.Queue{"embed/cancelled"},
 	})
 
-	_ = worker.Register("notify", cancelledJob())
+	_ = worker.Register("cancelled", cancelledJob())
 
 	if err := worker.Start(); err != nil {
 		t.Fatalf("failed to start worker: %v", err)
@@ -55,7 +55,7 @@ func TestCancelled(t *testing.T) {
 }
 
 func NewCancelledTask() *sqlq.JobDescription {
-	return sqlq.NewJobDesc("notify")
+	return sqlq.NewJobDesc("cancelled")
 }
 
 func cancelledJob() sqlq.HandlerFunc {
