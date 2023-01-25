@@ -132,7 +132,7 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 						if err = sqlq.Cancelled(worker.db, job); err != nil {
 							log.Printf("failed to mark job as cancelled: %#v", err)
 						}
-						// We need cancel the context after mark the job  as cancelled, otherwise it'd would
+						// We need to cancel the context after marking the job as cancelled, otherwise it would
 						// cause the user's routine to return an error which would then mark the job as errored rather than cancelled
 						cancel()
 
