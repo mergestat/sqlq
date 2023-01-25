@@ -2,12 +2,13 @@ package embed
 
 import (
 	"context"
-	"github.com/mergestat/sqlq"
-	"github.com/pkg/errors"
 	stdlog "log"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/mergestat/sqlq"
+	"github.com/pkg/errors"
 )
 
 func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(timeout time.Duration) error) {
@@ -59,6 +60,9 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 				// launch another goroutine to supervise the task in background
 				// we launch one more goroutine within this where the actual handler is invoked
 				go func(job *sqlq.Job) {
+					// cancelled is used to terminate the job routine that have a status equal to cancelling
+					var cancelled = make(chan struct{})
+
 					defer func() { <-sema }() // release semaphore token
 
 					// prepare context for job handler
@@ -84,6 +88,28 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 						panic(errors.Errorf("sqlq: type (%q) not supported but got picked", job.TypeName))
 					}
 
+					// we run a polling checking every 3 secongs whether the job have a
+					// cancelling status if so we change it's status to cancelled.
+					go func() {
+						ticker := time.NewTicker(3 * time.Second)
+						for {
+							select {
+							case <-jobContext.Done():
+								ticker.Stop()
+								return
+							case <-ticker.C:
+								var isCancelled bool
+								if isCancelled, err = sqlq.IsCancelled(worker.db, job); err != nil {
+									log.Printf("failed to : %#v", err)
+								}
+
+								if isCancelled {
+									close(cancelled)
+								}
+							}
+						}
+					}()
+
 					// run user defined handler inside a wrapper to catch any panics which might cause the worker to crash
 					var result = make(chan error, 1)
 					go func() {
@@ -102,9 +128,16 @@ func process(worker *Worker, loggingBackend sqlq.LogBackend) (shutdown func(time
 							log.Printf("failed to mark job as errored: %#v", err)
 						}
 
+					case <-cancelled:
+						if err = sqlq.Cancelled(worker.db, job); err != nil {
+							log.Printf("failed to mark job as cancelled: %#v", err)
+						}
+						// We need to cancel the context after marking the job as cancelled, otherwise it would
+						// cause the user's routine to return an error which would then mark the job as errored rather than cancelled
+						cancel()
+
 					// case <-jobContext.Done():
 					// 		This case is removed as handling context cancellation is a responsibility of the user-defined routine.
-
 					case resultError := <-result:
 						if resultError != nil {
 							if err = sqlq.Error(worker.db, job, resultError); err != nil {

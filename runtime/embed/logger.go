@@ -2,16 +2,18 @@ package embed
 
 import (
 	"database/sql"
-	"github.com/mergestat/sqlq"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/mergestat/sqlq"
 )
 
 // logger returns a new instance of a sqlq.LogBackend
 func logger(db *sql.DB) (sqlq.LogBackendAdapter, func() error) {
 	// event is the type of the payload shared on the internal buffer channel
 	type event = struct {
-		job   int
+		job   uuid.UUID
 		level sqlq.LogLevel
 		msg   string
 	}

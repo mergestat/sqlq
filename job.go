@@ -8,6 +8,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -61,6 +62,10 @@ func (i *JobState) Scan(src interface{}) error {
 			*i = StateSuccess
 		case "errored":
 			*i = StateErrored
+		case "cancelling":
+			*i = StateCancelling
+		case "cancelled":
+			*i = StateCancelled
 		default:
 			*i = StateInvalid
 		}
@@ -69,11 +74,13 @@ func (i *JobState) Scan(src interface{}) error {
 }
 
 const (
-	StateInvalid JobState = iota // invalid
-	StatePending                 // pending
-	StateRunning                 // running
-	StateSuccess                 // success
-	StateErrored                 // errored
+	StateInvalid    JobState = iota // invalid
+	StatePending                    // pending
+	StateRunning                    // running
+	StateSuccess                    // success
+	StateErrored                    // errored
+	StateCancelling                 // cancelling
+	StateCancelled                  // cancelled
 )
 
 // JobDescription describes a job to be enqueued. Note that it is just a set of options (that closely resembles) for a job,
@@ -118,11 +125,11 @@ func WithKeepAlive(n time.Duration) func(*JobDescription) {
 
 // Job represents an instance of a task / job in a queue.
 type Job struct {
-	ID       int      `db:"id"`
-	Queue    Queue    `db:"queue"`
-	TypeName string   `db:"typename"`
-	Priority int      `db:"priority"`
-	Status   JobState `db:"status"`
+	ID       uuid.UUID `db:"id"`
+	Queue    Queue     `db:"queue"`
+	TypeName string    `db:"typename"`
+	Priority int       `db:"priority"`
+	Status   JobState  `db:"status"`
 
 	Parameters []byte `db:"parameters"`
 	Result     []byte `db:"result"`

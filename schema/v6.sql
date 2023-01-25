@@ -36,7 +36,7 @@ $$ LANGUAGE SQL;
 -- Function: sqlq.mark_success
 --
 -- SQLQ.MARK_SUCCESS() transitions the job to 'success' state and mark it as completed.
-CREATE FUNCTION sqlq.mark_success(id INTEGER, expectedState SQLQ.JOB_STATES)
+CREATE FUNCTION sqlq.mark_success(id UUID, expectedState SQLQ.JOB_STATES)
 RETURNS SETOF sqlq.jobs AS $$
 BEGIN
     RETURN QUERY UPDATE sqlq.jobs SET status = 'success', completed_at = NOW()
@@ -49,7 +49,7 @@ $$ LANGUAGE plpgsql VOLATILE;
 --
 -- SQLQ.MARK_FAILED() transitions the job to ERROR state and mark it as completed. If the error is retryable
 -- (and there are still attempts left), we transition it to PENDING to be picked up again by a worker.
-CREATE FUNCTION sqlq.mark_failed(id INTEGER, expectedState SQLQ.JOB_STATES, retry BOOLEAN = false, run_after BIGINT = 0)
+CREATE FUNCTION sqlq.mark_failed(id UUID, expectedState SQLQ.JOB_STATES, retry BOOLEAN = false, run_after BIGINT = 0)
 RETURNS SETOF sqlq.jobs AS $$
 BEGIN
     IF retry THEN

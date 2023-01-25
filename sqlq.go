@@ -168,6 +168,53 @@ retry:
 	return &job, nil
 }
 
+// Cancelled transitions the job to CANCELLED state and mark it as completed
+func Cancelled(cx Connection, job *Job) (err error) {
+	var ctx = context.Background()
+	var rows *sql.Rows
+
+	const cancelJob = `
+	UPDATE sqlq.jobs
+		SET status = 'cancelled',
+		completed_at = NOW()
+	WHERE id =$1 AND status = 'cancelling'
+	RETURNING *`
+
+	if rows, err = cx.QueryContext(ctx, cancelJob, job.ID); err != nil {
+		return errors.Wrapf(err, "failed to executed cancel operation")
+	}
+
+	if err = scanJob(rows, job); err != nil {
+		if err == sql.ErrNoRows { // job wasn't in the given state?
+			return errors.Wrapf(ErrJobStateMismatch, "expected job to be in %s", job.Status)
+		}
+		return errors.Wrap(err, "failed to read back values")
+	}
+
+	return nil
+}
+
+// IsCancelled checks the current job state searching for a cancelling
+// state, if so returns true
+func IsCancelled(cx Connection, job *Job) (b bool, err error) {
+	var ctx = context.Background()
+	var res *sql.Rows
+	var result bool
+
+	const isCancelled = `SELECT * FROM sqlq.check_job_status($1, $2)`
+	if res, err = cx.QueryContext(ctx, isCancelled, job.ID, "cancelling"); err != nil {
+		return false, errors.Wrapf(err, "failed to checking job status")
+	}
+
+	if res.Next() {
+		if err = res.Scan(&result); err != nil {
+			return false, errors.Wrapf(err, "failed to scan")
+		}
+	}
+
+	return result, nil
+}
+
 // Success transitions the job to SUCCESS state and mark it as completed.
 func Success(cx Connection, job *Job) (err error) {
 	var ctx = context.Background()

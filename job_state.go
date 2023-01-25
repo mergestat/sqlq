@@ -13,11 +13,13 @@ func _() {
 	_ = x[StateRunning-2]
 	_ = x[StateSuccess-3]
 	_ = x[StateErrored-4]
+	_ = x[StateCancelling-5]
+	_ = x[StateCancelled-6]
 }
 
-const _JobState_name = "invalidpendingrunningsuccesserrored"
+const _JobState_name = "invalidpendingrunningsuccesserroredcancellingcancelled"
 
-var _JobState_index = [...]uint8{0, 7, 14, 21, 28, 35}
+var _JobState_index = [...]uint8{0, 7, 14, 21, 28, 35, 45, 54}
 
 func (i JobState) String() string {
 	if i >= JobState(len(_JobState_index)-1) {

@@ -1,11 +1,12 @@
 package sqlq_test
 
 import (
-	. "github.com/mergestat/sqlq"
-	"github.com/pkg/errors"
 	"math/rand"
 	"testing"
 	"time"
+
+	. "github.com/mergestat/sqlq"
+	"github.com/pkg/errors"
 )
 
 func TestSuccess(t *testing.T) {
