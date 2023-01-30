@@ -28,8 +28,8 @@ func Apply(c *sql.DB) (err error) {
 	var migrations = ReadMigrations(root)
 	sort.Stable(migrations) // sort in ascending order of version number
 
-	var currentVersion = 0
-	currentVersion, err = getCurrentMigrationVersion(c)
+	//var currentVersion = 0
+	currentVersion, err := getCurrentMigrationVersion(c)
 	if err != nil {
 		return err
 	}
