@@ -6,7 +6,7 @@
 -- a specific state.
 CREATE OR REPLACE FUNCTION sqlq.check_job_status(job_id UUID, state sqlq.job_states)
 RETURNS BOOLEAN AS $$
-BEGIN 
+BEGIN
     IF EXISTS(SELECT COUNT(*) FROM sqlq.jobs WHERE id = job_id AND status = state) THEN 
        RETURN TRUE;
     ELSE
