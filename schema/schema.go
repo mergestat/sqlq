@@ -41,6 +41,10 @@ func Apply(c *sql.DB) (err error) {
 		return errors.Wrap(err, "failed to fetch latest migration version")
 	}
 
+	if err = rows.Err(); err != nil {
+		return errors.Wrap(err, "failed to iterate over rows")
+	}
+
 	if rows.Next() {
 		if err = rows.Scan(&currentVersion); err != nil && err != sql.ErrNoRows {
 			return errors.Wrap(err, "failed to fetch latest migration version")
