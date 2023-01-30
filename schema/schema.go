@@ -4,8 +4,9 @@ package schema
 import (
 	"database/sql"
 	"embed"
-	"github.com/pkg/errors"
 	"sort"
+
+	"github.com/pkg/errors"
 )
 
 //go:embed *.sql
@@ -44,6 +45,10 @@ func Apply(c *sql.DB) (err error) {
 		if err = rows.Scan(&currentVersion); err != nil && err != sql.ErrNoRows {
 			return errors.Wrap(err, "failed to fetch latest migration version")
 		}
+	}
+
+	if err = rows.Err(); err != nil {
+		return errors.Wrap(err, "failed to iterate over rows")
 	}
 
 	for _, mg := range migrations {
