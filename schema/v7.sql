@@ -6,8 +6,6 @@
 -- recreate them with the UUID changes .
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-BEGIN;
-
 -- Dropping the tables also drops the associated functions 
 DROP TABLE IF EXISTS sqlq.jobs CASCADE;
 DROP TABLE IF EXISTS sqlq.job_logs CASCADE;
@@ -132,5 +130,3 @@ BEGIN
     END IF;
 END;
 $$ LANGUAGE plpgsql VOLATILE;
-
-COMMIT;
