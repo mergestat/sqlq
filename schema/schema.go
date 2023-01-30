@@ -87,8 +87,8 @@ func applySetup(c *sql.DB) error {
 	return errors.Wrapf(tx.Commit(), "failed to commit setup")
 }
 
-// applyMigrations is responsible  for apply a migration individually
-func applyMigrations(c *sql.DB, mg *EmbeddedMigration) error {
+// applyMigration applies a single embedded migration to the database
+func applyMigration(c *sql.DB, mg *EmbeddedMigration) error {
 	var tx *sql.Tx
 	var err error
 	if tx, err = c.Begin(); err != nil {
