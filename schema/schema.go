@@ -29,7 +29,8 @@ func Apply(c *sql.DB) (err error) {
 	sort.Stable(migrations) // sort in ascending order of version number
 
 	var currentVersion = 0
-	if currentVersion, err = getCurrentMigrationVersion(c); err != nil {
+	currentVersion, err = getCurrentMigrationVersion(c)
+	if err != nil {
 		return err
 	}
 
@@ -53,15 +54,9 @@ func getCurrentMigrationVersion(c *sql.DB) (int, error) {
 	const fetchCurrentVersion = "SELECT version FROM sqlq_migrations ORDER BY applied_on DESC, version DESC LIMIT 1"
 	var currentVersion int
 	var err error
-	var tx *sql.Tx
 	var rows *sql.Rows
 
-	if tx, err = c.Begin(); err != nil {
-		return 0, errors.Wrapf(err, "failed to start new transaction")
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if rows, err = tx.Query(fetchCurrentVersion); err != nil && err != sql.ErrNoRows {
+	if rows, err = c.Query(fetchCurrentVersion); err != nil && err != sql.ErrNoRows {
 		return 0, errors.Wrap(err, "failed to fetch latest migration version")
 	}
 
@@ -75,7 +70,7 @@ func getCurrentMigrationVersion(c *sql.DB) (int, error) {
 		return 0, errors.Wrap(err, "failed to iterate rows")
 	}
 
-	return currentVersion, errors.Wrapf(tx.Commit(), "failed commit getting current migration version")
+	return currentVersion, errors.Wrapf(err, "failed getting current migration version")
 }
 
 // applySetup creates if needed a migrations table
