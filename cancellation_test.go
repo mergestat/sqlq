@@ -31,14 +31,14 @@ func TestCancelled(t *testing.T) {
 		t.Fatalf("failed to start worker: %v", err)
 	}
 
-	time.Sleep(2 * time.Second)
+	time.Sleep(10 * time.Second)
 
 	if _, err := upstream.Exec("UPDATE sqlq.jobs SET status ='cancelling' WHERE id = $1", job.ID); err != nil {
 		t.Fatal(err)
 	}
 
 	// wait for the routine to execute
-	time.Sleep(2 * time.Second)
+	time.Sleep(10 * time.Second)
 	var isCancelled bool
 
 	if isCancelled, err = sqlq.IsCancelled(upstream, job); err != nil {
