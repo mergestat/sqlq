@@ -39,7 +39,7 @@ func Apply(c *sql.DB) (err error) {
 			continue // already applied. skip this migration
 		}
 
-		if err = applyMigrations(c, mg); err != nil {
+		if err = applyMigration(c, mg); err != nil {
 			return errors.Wrapf(err, "failed to apply migration: name=%s\tversion=%d", mg.Name(), mg.Version())
 		}
 
