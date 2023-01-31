@@ -4,8 +4,9 @@ package schema
 import (
 	"database/sql"
 	"embed"
-	"github.com/pkg/errors"
 	"sort"
+
+	"github.com/pkg/errors"
 )
 
 //go:embed *.sql
@@ -19,7 +20,62 @@ func setup(tx *sql.Tx) error {
 
 // Apply applies any pending schema migration on the database.
 func Apply(c *sql.DB) (err error) {
+
+	if err = applySetup(c); err != nil {
+		return err
+	}
+
+	var migrations = ReadMigrations(root)
+	sort.Stable(migrations) // sort in ascending order of version number
+
+	currentVersion, err := getCurrentMigrationVersion(c)
+	if err != nil {
+		return err
+	}
+
+	for _, mg := range migrations {
+
+		if mg.Version() <= currentVersion {
+			continue // already applied. skip this migration
+		}
+
+		if err = applyMigration(c, mg); err != nil {
+			return errors.Wrapf(err, "failed to apply migration: name=%s\tversion=%d", mg.Name(), mg.Version())
+		}
+
+	}
+
+	return nil
+}
+
+// getCurrentMigrationVersion gets the current version of our migrations
+func getCurrentMigrationVersion(c *sql.DB) (int, error) {
+	const fetchCurrentVersion = "SELECT version FROM sqlq_migrations ORDER BY applied_on DESC, version DESC LIMIT 1"
+	var currentVersion int
+	var err error
+	var rows *sql.Rows
+
+	if rows, err = c.Query(fetchCurrentVersion); err != nil && err != sql.ErrNoRows {
+		return 0, errors.Wrap(err, "failed to fetch latest migration version")
+	}
+
+	if rows.Next() {
+		if err = rows.Scan(&currentVersion); err != nil && err != sql.ErrNoRows {
+			return 0, errors.Wrap(err, "failed to fetch latest migration version")
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		return 0, errors.Wrap(err, "failed to iterate rows")
+	}
+
+	return currentVersion, errors.Wrapf(err, "failed getting current migration version")
+}
+
+// applySetup creates if needed a migrations table
+func applySetup(c *sql.DB) error {
 	var tx *sql.Tx
+	var err error
 	if tx, err = c.Begin(); err != nil {
 		return errors.Wrapf(err, "failed to start new transaction")
 	}
@@ -28,40 +84,28 @@ func Apply(c *sql.DB) (err error) {
 	if err = setup(tx); err != nil {
 		return errors.Wrapf(err, "failed to perform setup")
 	}
+	return errors.Wrapf(tx.Commit(), "failed to commit setup")
+}
 
-	var migrations = ReadMigrations(root)
-	sort.Stable(migrations) // sort in ascending order of version number
+// applyMigration applies a single embedded migration to the database
+func applyMigration(c *sql.DB, mg *EmbeddedMigration) error {
+	var tx *sql.Tx
+	var err error
+	if tx, err = c.Begin(); err != nil {
+		return errors.Wrapf(err, "failed to start new transaction")
+	}
+	defer func() { _ = tx.Rollback() }()
 
-	var currentVersion = 0
-	const fetchCurrentVersion = "SELECT version FROM sqlq_migrations ORDER BY applied_on DESC, version DESC LIMIT 1"
-
-	var rows *sql.Rows
-	if rows, err = tx.Query(fetchCurrentVersion); err != nil && err != sql.ErrNoRows {
-		return errors.Wrap(err, "failed to fetch latest migration version")
+	if err = mg.Apply(tx); err != nil {
+		return errors.Wrapf(err, "failed to apply migration(%s)", mg.Name())
 	}
 
-	if rows.Next() {
-		if err = rows.Scan(&currentVersion); err != nil && err != sql.ErrNoRows {
-			return errors.Wrap(err, "failed to fetch latest migration version")
-		}
+	const recordMigration = "INSERT INTO sqlq_migrations(name, version) VALUES ($1, $2)"
+
+	if _, err = tx.Exec(recordMigration, mg.Name(), mg.Version()); err != nil {
+		return errors.Wrapf(err, "failed to record migration: name=%s\tversion=%d", mg.Name(), mg.Version())
 	}
-
-	for _, mg := range migrations {
-		if mg.Version() <= currentVersion {
-			continue // already applied. skip this migration
-		}
-
-		if err = mg.Apply(tx); err != nil {
-			return errors.Wrapf(err, "failed to apply migration(%s)", mg.Name())
-		}
-
-		const recordMigration = "INSERT INTO sqlq_migrations(name, version) VALUES ($1, $2)"
-		if _, err = tx.Exec(recordMigration, mg.Name(), mg.Version()); err != nil {
-			return errors.Wrapf(err, "failed to record migration: name=%s\tversion=%d", mg.Name(), mg.Version())
-		}
-	}
-
-	return errors.Wrapf(tx.Commit(), "failed to commit migration")
+	return errors.Wrapf(tx.Commit(), "failed to commit migrations")
 }
 
 // Teardown tears down the sql migrations and drop the default schema
