@@ -69,19 +69,17 @@ func cancelledJob() sqlq.HandlerFunc {
 
 func Waiter(wg *sync.WaitGroup) sqlq.HandlerFunc {
 	return func(ctx context.Context, job *sqlq.Job) error {
-		select {
-		case <-time.After(10 * time.Second):
-			wg.Done()
-			return errors.New("test")
-		}
+		<-time.After(10 * time.Second)
+		wg.Done()
+		return errors.New("test")
 	}
 }
 
 func TestLeak(t *testing.T) {
 	var upstream = MustOpen(PostgresUrl)
+
 	defer upstream.Close()
 
-	//upstream.SetMaxOpenConns(2)
 	t.Logf("stats: %+v", upstream.Stats())
 	var wg sync.WaitGroup
 
