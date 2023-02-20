@@ -198,16 +198,18 @@ func Cancelled(cx Connection, job *Job) (err error) {
 // state, if so returns true
 func IsCancelled(cx Connection, job *Job) (b bool, err error) {
 	var ctx = context.Background()
-	var res *sql.Rows
+	var rows *sql.Rows
 	var result bool
 
 	const isCancelled = `SELECT * FROM sqlq.check_job_status($1, $2)`
-	if res, err = cx.QueryContext(ctx, isCancelled, job.ID, "cancelling"); err != nil {
+	if rows, err = cx.QueryContext(ctx, isCancelled, job.ID, "cancelling"); err != nil {
 		return false, errors.Wrapf(err, "failed to checking job status")
 	}
 
-	if res.Next() {
-		if err = res.Scan(&result); err != nil {
+	defer func() { _ = rows.Close() }()
+
+	if rows.Next() {
+		if err = rows.Scan(&result); err != nil {
 			return false, errors.Wrapf(err, "failed to scan")
 		}
 	}

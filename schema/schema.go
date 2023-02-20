@@ -59,6 +59,8 @@ func getCurrentMigrationVersion(c *sql.DB) (int, error) {
 		return 0, errors.Wrap(err, "failed to fetch latest migration version")
 	}
 
+	defer func() { _ = rows.Close() }()
+
 	if rows.Next() {
 		if err = rows.Scan(&currentVersion); err != nil && err != sql.ErrNoRows {
 			return 0, errors.Wrap(err, "failed to fetch latest migration version")
