@@ -74,10 +74,6 @@ type Worker struct {
 func NewWorker(db *sql.DB, config WorkerConfig) (*Worker, error) {
 	var worker = &Worker{db: db, handlers: make(map[string]sqlq.Handler)}
 
-	if len(config.Queues) == 0 {
-		return nil, errors.New("provide list of queues to watch")
-	}
-
 	if config.Concurrency <= 0 { // override concurrency if not provided
 		config.Concurrency = runtime.NumCPU()
 	}
