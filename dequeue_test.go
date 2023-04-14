@@ -2,11 +2,12 @@ package sqlq_test
 
 import (
 	"database/sql"
-	. "github.com/mergestat/sqlq"
-	"github.com/pkg/errors"
 	"sync"
 	"testing"
 	"time"
+
+	. "github.com/mergestat/sqlq"
+	"github.com/pkg/errors"
 )
 
 func setConcurrencyAndPriority(db *sql.DB, queue Queue, c, p int) error {
@@ -29,7 +30,7 @@ func TestDequeue(t *testing.T) {
 		}
 	}
 
-	if err := setConcurrencyAndPriority(upstream, "critical", 1, 10); err != nil {
+	if err := setConcurrencyAndPriority(upstream, "critical", 1, 0); err != nil {
 		t.Fatalf("failed to update queue concurrency: %v", err)
 	}
 
