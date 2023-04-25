@@ -92,6 +92,7 @@ type JobDescription struct {
 	runAfter     *time.Duration
 	retentionTTL *time.Duration
 	maxRetries   *int
+	priority     *int
 }
 
 // NewJobDesc creates a new JobDescription for a job with given typename and with the provided opts.
@@ -121,6 +122,11 @@ func WithMaxRetries(n int) func(*JobDescription) {
 // WithKeepAlive sets the keepalive ping duration for the job.
 func WithKeepAlive(n time.Duration) func(*JobDescription) {
 	return func(desc *JobDescription) { desc.keepAlive = &n }
+}
+
+// WithPriority sets the job's priority.
+func WithPriority(p int) func(*JobDescription) {
+	return func(desc *JobDescription) { desc.priority = &p }
 }
 
 // Job represents an instance of a task / job in a queue.
