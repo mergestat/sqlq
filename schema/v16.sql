@@ -27,7 +27,7 @@ BEGIN
 
     -- emit a log line
     INSERT INTO sqlq.job_logs(job, level, message)
-    SELECT u.id, 'warn'::sqlq.log_level, 'job was reaped'
+    SELECT u.id, 'warn'::sqlq.log_level, 'job has timed out and is now marked as errored'
     FROM UNNEST(jobs) u(id);
 
     SELECT array_length(jobs, 1) INTO count FROM unnest(jobs) u(id);
