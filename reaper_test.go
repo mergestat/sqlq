@@ -12,7 +12,7 @@ func TestReap(t *testing.T) {
 	defer upstream.Close()
 
 	var err error
-	var jd = NewJobDesc("blocker", WithMaxRetries(2), WithKeepAlive(2*time.Second))
+	var jd = NewJobDesc("blocker", WithMaxRetries(1), WithKeepAlive(2*time.Second))
 	if _, err = Enqueue(upstream, "test/reaper", jd); err != nil {
 		t.Fatalf("failed to enqueue: %#v", err)
 	}
