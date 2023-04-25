@@ -72,6 +72,10 @@ func Enqueue(cx Connection, queue Queue, desc *JobDescription) (_ *Job, err erro
 		add("keepalive_interval", desc.keepAlive)
 	}
 
+	if desc.priority != nil {
+		add("priority", desc.priority)
+	}
+
 	var rows *sql.Rows
 	var createJob = `INSERT INTO sqlq.jobs (` + strings.Join(columns, ",") + `) VALUES (` + strings.Join(placeholders, ",") + `) RETURNING *`
 	if rows, err = cx.QueryContext(ctx, createJob, args...); err != nil {
