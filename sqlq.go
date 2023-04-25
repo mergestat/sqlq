@@ -267,7 +267,7 @@ func Error(cx Connection, job *Job, userError error) (err error) {
 
 // Reap reaps any zombie process, processes where state is 'running' but the job hasn't pinged in a while, in the given queues.
 // It moves any job with remaining attempts back to the queue while dumping all others in to the errored state.
-func Reap(cx Connection, queues []Queue) (n int64, err error) {
+func Reap(cx Connection, queues []Queue) (_ int64, err error) {
 	var ctx = context.Background()
 
 	var rows *sql.Rows
@@ -277,11 +277,12 @@ func Reap(cx Connection, queues []Queue) (n int64, err error) {
 	}
 	defer rows.Close()
 
+	var n sql.NullInt64
 	if rows.Next() {
 		if err = rows.Scan(&n); err != nil {
 			return 0, errors.Wrapf(err, "failed to reap zombie processes")
 		}
 	}
 
-	return n, rows.Err()
+	return n.Int64, rows.Err()
 }
